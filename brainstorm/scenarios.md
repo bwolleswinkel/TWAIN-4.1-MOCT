@@ -11,6 +11,6 @@ import twain.moct as moct
 moct.open()
 ```
 2. A GUI pops up, which looks something like this:
-
+![gui_alice_draft](images/gui_alice_draft.png)
 3. DFd
 4. dfd
