@@ -9,4 +9,8 @@ Alice is from academia, is a first-time user, has just heard of the software thr
 import twain.moct as moct
 
 moct.open()
+```
 2. A GUI pops up, which looks something like this:
+
+3. DFd
+4. dfd
