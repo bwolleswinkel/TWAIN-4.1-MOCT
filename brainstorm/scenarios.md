@@ -25,12 +25,14 @@ Bob is a veteran wind energy researcher working at \<university-name\> and has e
 1. He creates a new script, `run_layout_opt.py`, where he inserts his credentials as follows:
 ```
 import twain.moct as moct
+import getpass
 
-# Credentials
-USERNAME = 'BobDoe'
-PASSWORD = ...
+# Establish a connection to the TWAIN environment
+username = 'BobDoe'
+password = hash(getpass.getpass(f"Enter password for user '{username}': "))
 ```
-3. 
+2. A prompt `Enter password for user 'BobDoe': ` appears, where Bob can type his credentials.
+3. He launches the GUI, where the backend automatically connects to the TWAIN database, as well as a local directory.
 
 # Scenario 3: Charlie
 
