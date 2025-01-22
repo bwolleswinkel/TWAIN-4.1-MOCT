@@ -33,6 +33,12 @@ password = hash(getpass.getpass(f"Enter password for user '{username}': "))
 ```
 2. A prompt `Enter password for user 'BobDoe': ` appears, where Bob can type his credentials.
 3. He launches the GUI, where the backend automatically connects to the TWAIN database, as well as a local directory.
+```
+# Launch the GUI
+moct.open(connect={'username': username, 'password': password}, dir_local='./data/example2/')
+```
+5. As no wind farm configuration is provided, Bob has to specify the number of wind turbines `no_wt` (positive integer), as well as the turbine model `wt_model` (drop-down menu), which are all models available in his TWAIN environment.
+6. Next, he selects the wind rose data stored in the local repository `data/example2/wind_rose_site.yaml`
 
 # Scenario 3: Charlie
 
@@ -65,3 +71,6 @@ wind_prediction = wfm.request(loc=[props_wf.stat.long, props_wf.stat.lat], time=
 moct.construct(from_model=moct.df2wf(props_wf), dynamic=wind_prediction)
 ```
 
+# Scenario 4: Dave
+
+Dave is a maintainer of the MOCT module and would like to improve the models used. He has his own branch on the repository, where he would like to implement different surrogate models (with different WT controllers).
