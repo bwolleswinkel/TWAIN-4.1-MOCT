@@ -1,8 +1,8 @@
 ## Here we explain scenarios of different users
 
-# Scenario 1: Bob
+# Scenario 1: Alice
 
-Alice is from academia, is a first-time user, has just heard of the software through a paper/the project. She clones the Github repository, open here Python IDE, and does the following:
+Alice is from academia, and is a first-time user. She has just heard of the software through a mention of the TWAIN project from colleagues. She clones the Github repository, opens Jupyter Notebook, and does the following:
 
 1. In a new script, she types:
 ```
