@@ -4,7 +4,7 @@
 
 Alice is an MSc. student and is a first-time user. She has just heard of the software through a mention of the TWAIN project from colleagues. She clones the Github repository, opens Jupyter Notebook, and does the following:
 
-1. She opens the file `exampleYawSetpoints.py,` which looks as follows:
+1. She opens the file `example_yaw_setpoints.py,` which looks as follows:
 ```
 import twain.moct as moct
 
@@ -22,7 +22,15 @@ moct.open(load='date/examples/wf20_12MW_homogeneous')
 
 Bob is a veteran wind energy researcher working at \<university-name\> and has experience with many wind farm control toolboxes.
 
-1. 
+1. He creates a new script, `run_layout_opt.py`, where he inserts his credentials as follows:
+```
+import twain.moct as moct
+
+# Credentials
+USERNAME = 'BobDoe'
+PASSWORD = ...
+```
+3. 
 
 # Scenario 3: Charlie
 
