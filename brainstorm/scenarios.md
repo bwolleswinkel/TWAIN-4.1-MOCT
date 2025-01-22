@@ -38,7 +38,7 @@ password = hash(getpass.getpass(f"Enter password for user '{username}': "))
 moct.open(connect={'username': username, 'password': password}, dir_local='./data/example2/')
 ```
 5. As no wind farm configuration is provided, Bob has to specify the number of wind turbines `no_wt` (positive integer), as well as the turbine model `wt_model` (drop-down menu), which are all models available in his TWAIN environment.
-6. Next, he selects the wind rose data stored in the local file `data/example2/wind_rose_site.yaml`, which is then graphed in the GUI.
+6. Next, he selects the wind rose data stored in the local file `data/example2/wind_rose.yaml`, which is then graphed in the GUI.
 7. ...
 
 # Scenario 3: Charlie
