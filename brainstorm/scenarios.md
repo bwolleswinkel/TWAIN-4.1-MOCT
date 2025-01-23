@@ -15,8 +15,9 @@ moct.open(load='data/examples/wf20_12MW_homogeneous')
 3. In the example script, the layout for a 20-turbine wind turbine is already provided, which is visualized in the GUI.
 4. From the different modes/objectives of the MOCT, she selects the option 'Calculate optimal yaw-steering setpoints'.
 5. There are two empty fields she has to fill out before she can press the button 'COMPUTE'. These are `U_inf` (> 0 m/s) and `wind_direction` (between 0° and 360°).
-6. After filling in these fields with 14 m/s and 210°, respectively, she presses the button 'COMPUTE'. A new window pops up, which shows the progress.
-7. When the computation is done, the window closes 
+6. FIXME Do something with weighting objectives
+7. After filling in these fields with 14 m/s and 210°, respectively, she presses the button 'COMPUTE'. A new window pops up, which shows the progress.
+8. When the computation is done, the window closes 
 
 # Scenario 2: Bob
 
