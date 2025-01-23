@@ -8,7 +8,7 @@ Alice is an MSc. student and is a first-time user. She has just heard of the sof
 ```
 import twain.moct as moct
 
-moct.open(load='date/examples/wf20_12MW_homogeneous')
+moct.open(load='data/examples/wf20_12MW_homogeneous')
 ```
 2. This opens a GUI, which looks like this:
 ![gui_alice_draft](images/gui_alice_draft.png)
