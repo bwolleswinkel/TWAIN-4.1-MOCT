@@ -56,10 +56,9 @@ import pandas as pd
 2. He establishes a connection to the TWAIN database and loads the private SCADA/... data for his particular wind farm.
 ```
 # Establish a secure connection to the TWAIN database
-IP = '1.1.150.187.0090'
 ssh = SSHClient()
-ssh.load_system_host_keys()
-ssh.connect(IP, ...)
+ssh.load_system_host_keys(dir='user/charlie/.ssh/twain')
+ssh.connect()
 
 # Load static properties related to the site near Sodavac
 props_wf = moct.retrieve(ssh, id='cheçA_1123-WF.name=Bouen', subselect=['wind_rose', 'wf_model_params']).toDataframe()
