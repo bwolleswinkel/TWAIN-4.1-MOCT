@@ -1,4 +1,6 @@
-An optimization problem consists of two main constituents: a number of decision variables $\boldsymbol{x}$
+An optimization problem consists of two main constituents: a number of decision variables $\boldsymbol{x}$ and an objective function $\boldsymbol{J}$. Furthermore, we might have some parameters $\boldsymbol{\theta}$ (e.g., wind speed, TI, ...) which also determines the optimal decision variables $\boldsymbol{x}^{\star}$. The optimization problem can be written as:
+
+$$\min_{\boldsymbol{x}} \boldsymbol{J}(\boldsymbol{x}, \boldsymbol{\theta}) \qquad \text{s.t.} \qquad \boldsymbol{g}(\boldsymbol{x}, \boldsymbol{\theta}) \leq \boldsymbol{0}, \quad \boldsymbol{h}(\boldsymbol{x}, \boldsymbol{\theta}) = \boldsymbol{0}.$$
 
 *Difficulties:*
 
@@ -9,8 +11,9 @@ An optimization problem consists of two main constituents: a number of decision 
 - **Absent gradient:** For most objective functions $J$, the gradient $\partial J(\boldsymbol{x}, \boldsymbol{\theta}) / \partial \boldsymbol{x}$, which makes finding solutions difficult (use of gradient-free/global methods, e.g., genetic algorithms, simulated annealing, etc.).
 - **Non-convex:** The objective function $J$ is non-convection and/or highly nonlinear, meaning no unique minimum exists.
 - **Expensive:** The objective function $J(\boldsymbol{x}, \boldsymbol{\theta})$ is expensive to evaluate, which makes solving the optimization problem slow.
+- **Undefined:** For some combinations of decision variables $\boldsymbol{x}$ and objective functions $J$ the values $J(\boldsymbol{x},\boldsymbol{\theta}) = \varnothing$ is undefined.
 
-## $\S$Control strategies:
+## 1. Control strategies:
 
 We consider two control strategies:
 
@@ -28,9 +31,18 @@ Control variables (for each $i$-th WT):
 - **Available:** Yaw angle $\gamma_{i}$, ... curve $C_{T}$, ... $C_{P}.
 - **Inaccesable:** Generator torque $\tau_{\mathrm{gen}}$, blade pitch $\beta_{i}$.
   
-## Control co-design:
+## 2. Control co-design:
 
 There are different scenarios for (offline) control co-design:
 
 1. Topology optimization, where the position $(x_{i},y_{i})$ of each WT is a decision variable. This can be combined with greedy control, yaw steering, or downregulation/derating.
-2. 
+2. Repowering, where the topology of the wind farm is fixed but where we can choose a WT model (for each fixed position) based on $n$ different models of WTs available.
+
+## 3. Metrics:
+
+Here, we discuss all the metrics at play:
+
+- **Economical/performance:** Anual energy production (AEP), levelised cost of energy (LCoE).
+- **Lifetime:** Fatigue loads (on the blades), generator shaft expected lifetime.
+- **Ecological:** Curtailment for bats (shutdown and start-up).
+- **Sociological:** Noise curtailment by means of downregulation.
