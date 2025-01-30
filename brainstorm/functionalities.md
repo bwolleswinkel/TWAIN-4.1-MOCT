@@ -1,4 +1,16 @@
-## Control strategies:
+An optimization problem consists of two main constituents: a number of decision variables $\boldsymbol{x}$
+
+*Difficulties:*
+
+- **Multi-objective:** The objective function $\boldsymbol{J}$ is vector-valued, meaning the optimization results in a Pareto front with no clear single optimal solution.
+- **Integer decision variables:** The decision variables $\boldsymbol{x}$ are (partly) integer-valued, making the optimization problem significantly more complex (MI...).
+- **Discontinuous:** The objective function $J$ is discontinuous, which can make solving the optimization problem infeasible.
+- **Non-numeric:** For certain objectives functions/metrix $J$, the value $J(\boldsymbol{x},\boldsymbol{\theta}) \in \\{ \mathrm{good}, \mathrm{bad}, \mathrm{worse} \\}$ are non-numeric values.
+- **Absent gradient:** For most objective functions $J$, the gradient $\partial J(\boldsymbol{x}, \boldsymbol{\theta}) / \partial \boldsymbol{x}$, which makes finding solutions difficult (use of gradient-free/global methods, e.g., genetic algorithms, simulated annealing, etc.).
+- **Non-convex:** The objective function $J$ is non-convection and/or highly nonlinear, meaning no unique minimum exists.
+- **Expensive:** The objective function $J(\boldsymbol{x}, \boldsymbol{\theta})$ is expensive to evaluate, which makes solving the optimization problem slow.
+
+## $\S$Control strategies:
 
 We consider two control strategies:
 
@@ -9,12 +21,16 @@ We consider two control strategies:
    - Note that the 'control' variables of the wind turbine are generator torque and (individual) blade pitch, $\tau_{\mathrm{gen}}$ and $\beta_{j}$, respectively.
    - Instead, the variables we can change are the $C_{T}$ and $C_{P}$ curves of each WT (used by FLORIS/PyWake). We have a mapping $C_{T},C_{P} \mapsto P_{i}$.
    - Note that the former are all at least variables of the wind speed $U_{\infty}$.
+4. Shutdown/start-up of individual turbines, where we either do this at fixed times (are these times a decision variable then) or reactive (based on, e.g., data from bird migration or thunderstorms/hurricanes).
   
 Control variables (for each $i$-th WT):
 
 - **Available:** Yaw angle $\gamma_{i}$, ... curve $C_{T}$, ... $C_{P}.
-- **Inaccesable:** Generator torque $\tau_{}$
+- **Inaccesable:** Generator torque $\tau_{\mathrm{gen}}$, blade pitch $\beta_{i}$.
   
 ## Control co-design:
 
-There are different 
+There are different scenarios for (offline) control co-design:
+
+1. Topology optimization, where the position $(x_{i},y_{i})$ of each WT is a decision variable. This can be combined with greedy control, yaw steering, or downregulation/derating.
+2. 
