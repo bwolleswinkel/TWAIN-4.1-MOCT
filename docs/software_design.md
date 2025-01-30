@@ -30,7 +30,7 @@ The software provides the following core functionalities:
 
 ### High-level interaction with TWAIN
 #### Diagram
-<img src="top_level.png" alt="Top level view" width="600"/>
+<img src="top_level.png" alt="Top level view" width="1000"/>
 
 ### Layered Design
 The system consists of three primary layers:
