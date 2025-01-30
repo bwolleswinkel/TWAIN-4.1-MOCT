@@ -28,7 +28,7 @@ We consider two control strategies:
   
 Control variables (for each $i$-th WT):
 
-- **Available:** Yaw angle $\gamma_{i}$, ... curve $C_{T}$, ... $C_{P}$.
+- **Available:** Yaw angle $\gamma_{i}$, ... curve $C_{T}$, ... curve $C_{P}$.
 - **Inaccesable:** Generator torque $\tau_{\mathrm{gen}}$, blade pitch $\beta_{i}$.
   
 ## 2. Control co-design:
