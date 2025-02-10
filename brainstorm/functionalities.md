@@ -11,6 +11,7 @@ $$\min_{\boldsymbol{x}} \boldsymbol{J}(\boldsymbol{x}, \boldsymbol{\theta}) \qqu
 - **Absent gradient:** For most objective functions $J$, the gradient $\partial J(\boldsymbol{x}, \boldsymbol{\theta}) / \partial \boldsymbol{x}$, which makes finding solutions difficult (use of gradient-free/global methods, e.g., genetic algorithms, simulated annealing, etc.).
 - **Non-convex:** The objective function $J$ is non-convection and/or highly nonlinear, meaning no unique minimum exists.
 - **Expensive:** The objective function $J(\boldsymbol{x}, \boldsymbol{\theta})$ is expensive to evaluate, which makes solving the optimization problem slow.
+- **Combinatorial:** Related to the former, the domain of (some of) the decision variables might be discrete/discretized, but the number of combinations explodes exponentially.
 - **Undefined:** For some combinations of decision variables $\boldsymbol{x}$ and objective functions $J$ the values $J(\boldsymbol{x},\boldsymbol{\theta}) = \varnothing$ is undefined.
 
 ## 1. Control strategies:
@@ -24,11 +25,11 @@ We consider two control strategies:
    - Note that the 'control' variables of the wind turbine are generator torque and (individual) blade pitch, $\tau_{\mathrm{gen}}$ and $\beta_{j}$, respectively.
    - Instead, the variables we can change are the $C_{T}$ and $C_{P}$ curves of each WT (used by FLORIS/PyWake). We have a mapping $C_{T},C_{P} \mapsto P_{i}$.
    - Note that the former are all at least variables of the wind speed $U_{\infty}$.
-4. Shutdown/start-up of individual turbines, where we either do this at fixed times (are these times a decision variable then) or reactive (based on, e.g., data from bird migration or thunderstorms/hurricanes).
+4. Shutdown/start-up of individual turbines, where we either do this at fixed times (are these times a decision variable then) or reactive (based on, e.g., data from bird/bird migration or thunderstorms/hurricanes).
   
 Control variables (for each $i$-th WT):
 
-- **Available:** Yaw angle $\gamma_{i}$, ... curve $C_{T}$, ... curve $C_{P}$.
+- **Available:** Yaw angle $\gamma_{i}$, $C_{T}$ curve, $C_{P}$ curve.
 - **Inaccesable:** Generator torque $\tau_{\mathrm{gen}}$, blade pitch $\beta_{i}$.
   
 ## 2. Control co-design:
