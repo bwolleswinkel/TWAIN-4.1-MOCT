@@ -1,0 +1,8 @@
+pipython
+---
+numpy
+scipy
+yaml (maybe not needed?)
+pyyaml
+pandas
+matplotlib
