@@ -6,3 +6,4 @@ yaml (maybe not needed?)
 pyyaml
 pandas
 matplotlib
+floris

@@ -19,8 +19,9 @@ from twain import moct, plot
 layout = 'data/example_site_1/wf_layout.csv'
 
 # Select the scenario parameters
-U_inf = 10.0  # In m/s
-theta = 210  # In degrees
+U_inf = 12.0  # Mean wind speed, in m/s
+theta = 210  # Wind direction, in degrees
+turb_intensity = 0.06  # Turbulence intensity
 
 # ------------ SCRIPT ------------
 
@@ -48,21 +49,22 @@ scenario = moct.Scenario(wf_layout=array_layout, U_inf=U_inf, theta=theta)
 problem = moct.OptProblem(scenario, metrics=['aep'], opt_type='downregulation')
 
 # Solve the problem
-solution = problem.solve()
-
-# TEMP
-#
-print(solution.yaw_angles)
-print(solution.power_setpoints)
-#
+optimal_control_setpoints = problem.solve()
 
 # ------------ PLOTTING ------------
 
 # Plot the wind-farm layout
 fig_layout, ax_layout = plt.subplots()
-plot.layout(scenario, ax_exist=ax_layout)
+ax_layout = plot.layout(scenario, ax_exist=ax_layout)
 fig_layout.suptitle("Wind-farm layout")
+
+# Plot the noise field
+fig_noise, ax_noise = plot.noise_field(scenario, optimal_control_setpoints)
+ax_noise.set_xlim([0, 500])
+ax_noise.set_ylim([0, 500])
+fig_noise.suptitle("Noise field")
 
 # Show the plots
 # plt.close(fig_layout)
+# plt.close(fig_noise)
 plt.show()

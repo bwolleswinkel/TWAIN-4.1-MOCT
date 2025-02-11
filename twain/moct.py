@@ -6,8 +6,10 @@ from typing import TypeVar, TypeAlias, List
 from pathlib import Path
 
 import numpy as np
+import scipy as sp
 import pandas as pd
 import numpy.typing as npt
+from floris import FlorisModel
 
 # ------ TYPE ALIASES ------
 
@@ -21,14 +23,21 @@ class Scenario:
     """
     Class which stores a scenario.
     """
-    DEFAULT_WT_MODEL = 'DTU10MW'
+    DEFAULT_WT_MODEL = 'nrel_5MW'
     
-    def __init__(self, wf_layout: NPArray[float] = None, U_inf: float = None, theta: float = None, model: tuple[str, ...] = None) -> None:
+    def __init__(self, wf_layout: NPArray[float] = None, U_inf: float = None, theta: float = None, TI: float = None, model: tuple[str, ...] = None, perimeter: NPArray[float] = None) -> None:
         self.wf_layout = pd.DataFrame(wf_layout, columns=['x', 'y'])
         self.U_inf = U_inf
         self.theta = theta
-        self.model = model if model is not None else [self.DEFAULT_WT_MODEL for _ in range(wf_layout.shape[0])]
+        self.TI = TI
+        self.wt_model = model if model is not None else [self.DEFAULT_WT_MODEL for _ in range(wf_layout.shape[0])]
         self.n_wt = wf_layout.shape[0]
+        self.wind_rose = None
+        if perimeter is None:
+            convex_hull_indices = sp.spatial.ConvexHull(wf_layout).vertices
+            self.perimeter = np.column_stack([wf_layout[convex_hull_indices, 0], wf_layout[convex_hull_indices, 1]])
+        else:
+            self.perimeter = perimeter
 
 
 class OptProblem:
@@ -76,17 +85,92 @@ class WindFarmModel:
 
     def __init__(self, scenario: Scenario, wake_surrogate: str = None) -> None:
         self.scenario = scenario
-        self.wake_surrogate = wake_surrogate if wake_surrogate is not None else DEFAULT_WAKE_SURROGATE
+        self.wake_surrogate = wake_surrogate if wake_surrogate is not None else self.DEFAULT_WAKE_SURROGATE
 
-    def impact_control_variables(self, control_setpoints: ControlSetpoints) -> NPArray[float]:
+    def impact_control_variables(self, control_setpoints: ControlSetpoints, N_grid: int = 100) -> NPArray[float]:
         """
         Function to compute the impact of the control variables on the wind farm.
         """
+        #: Calculate the power
+        match self.wake_surrogate:
+            case 'FLORIS':
+                #: Construct the wind farm model from a template
+                fmodel = FlorisModel('./config/floris/config_floris_farm.yaml')
+                fmodel.set(layout_x=self.scenario.wf_layout['x'], layout_y=self.scenario.wf_layout['y'])
+                fmodel.set(turbulence_intensities=[self.scenario.TI], wind_directions=[self.scenario.theta], wind_speeds=[self.scenario.U_inf])
+                # FIXME: This gives a persistent warning 'floris.floris_model.FlorisModel WARNING turbine_type has been changed without specifying a new reference_wind_height. reference_wind_height remains 90.00 m. Consider calling `FlorisModel.assign_hub_height_to_ref_height` to update the reference wind height to the turbine hub height.'
+                # fmodel.set_wt_yaw(turbine_type=self.scenario.wt_model)
+                if self.scenario.wind_rose is not None:
+                    fmodel.set(wind_data=self.scenario.wind_rose)
+                #: Set the control variables
+                fmodel.set(yaw_angles=[control_setpoints.yaw_angles])
+                if control_setpoints.power_setpoints is True:
+                    fmodel.set_operation_model("simple-derating")
+                    fmodel.set(power_setpoints=[control_setpoints.power_setpoints])
+                #: Run the model
+                fmodel.run()
+                #: Extract the powers and local wind speeds
+                wt_power, wt_wind_speed = fmodel.get_turbine_powers(), np.zeros(self.scenario.n_wt)
+                # TEMP
+                #
+                import floris.layout_visualization as layoutviz
+                from floris.flow_visualization import visualize_cut_plane
+                x, y = fmodel.get_turbine_layout()
+                print("     x       y")
+                for _x, _y in zip(x, y):
+                    print(f"{_x:6.1f}, {_y:6.1f}")
+                horizontal_plane = fmodel.calculate_horizontal_plane(height=90.0)
+                import matplotlib.pyplot as plt
+                layoutviz.plot_turbine_points(fmodel)
+                visualize_cut_plane(horizontal_plane, title="270 - Aligned")
+                plt.show()
+                #
+                #: Construct the load surrogate model
+                lmodel = LoadSurrogateModel()
+                #: Extract the loads
+                wt_load = np.zeros(self.scenario.n_wt)
+                # FIXME: Now, we need to add braces everywhere, because FLORIS accepts multiple wind directions
+                for idx in range(self.scenario.n_wt):
+                    wt_load[idx] = lmodel.get_turbine_loads(wt_power[0, idx], wt_wind_speed[idx])
+            case 'PyWake':
+                raise NotImplementedError("PyWake wake surrogate not yet implemented")
+            case _:
+                raise ValueError(f"Unrecognized wake surrogate model '{self.wake_surrogate}'")
         #: Create something random
-        wt_power, wt_load, wt_noise = np.random.rand(3, self.scenario.wf_layout.shape[0])
+        wt_load = None
+        #: Extract the perimeter of the wind farm
+        perimeter = self.scenario.perimeter
+        #: Create a meshgrid
+        (X, Y), Z = np.meshgrid(np.linspace(perimeter[:, 0].min(), perimeter[:, 0].max(), N_grid), np.linspace(perimeter[:, 1].min(), perimeter[:, 1].max(), N_grid), indexing='xy'), np.zeros((N_grid, N_grid))
+        #: Convert the wind-farm layout to a numpy array
+        wf_array_layout = self.scenario.wf_layout.to_numpy()
+        #: Compute the noise field
+        for wt in wf_array_layout:
+            #: Compute the distribution
+            Z += placeholder_oscilation_decay_2d(X, Y, wt, self.scenario.U_inf, self.scenario.theta)
+        wf_noise = Z
+        #: Cap the noise
+        wf_noise = 4 * np.clip(wf_noise + 12, 0, Z.max())
         #: Return the results
-        return wt_power, wt_load, wt_noise
+        return wt_power, wt_load, (X, Y, wf_noise)
     
+
+class LoadSurrogateModel:
+    """
+    Class which stores the load surrogate model.
+    """
+    def __init__(self) -> None:
+        pass
+
+    def get_turbine_loads(self, wt_power: NPArray[float], wt_wind_speed: NPArray[float]) -> NPArray[float]:
+        """
+        Function to compute the loads on the wind turbines.
+        """
+        #: Create something random
+        wt_load = np.random.uniform(0, 1)
+        #: Return the result
+        return wt_load
+
 
 class Metrics:
     """
@@ -103,6 +187,17 @@ class Metrics:
         aep = np.sum(wt_power)
         #: Return the result
         return aep
+    
+    def compute_lcoe(self, scenario: Scenario, wt_power: NPArray[float]) -> float:
+        """
+        Function to compute the levelized cost of energy. This also takes into account loads.
+        """
+        #: Compute the annual energy production
+        aep = self.compute_aep(wt_power)
+        #: Compute the levelized cost of energy
+        lcoe = 1.0 * aep
+        #: Return the result
+        return lcoe
 
 
 # ------ FUNCTIONS ------
@@ -128,5 +223,26 @@ def optimal_downregulation(problem: OptProblem, N_iter: int = 100) -> ControlSet
         control_setpoints = ControlSetpoints(yaw_angles=np.zeros(problem.scenario.n_wt), power_setpoints=np.random.uniform(0, 1, problem.scenario.n_wt))
     #: Return the results
     return control_setpoints
+
+
+# ------ PLACEHOLDERS ------
+
+
+def placeholder_oscilation_decay_2d(X: NPArray[float], Y: NPArray[float], wt_loc: NPArray[float], U_inf: float, theta: float) -> NPArray[float]:
+    """
+    Function to compute the 2D draft oscillation decay.
+    """
+    #: Compute the distance
+    R = np.sqrt((X - wt_loc[0]) ** 2 + (Y - wt_loc[1]) ** 2)
+    #: Compute the angle
+    alpha = np.arctan2(Y - wt_loc[1], X - wt_loc[0])
+    #: Compute the decay
+    decay = np.exp(-R / 100)
+    #: Compute the oscillation
+    oscillation = np.sin(2 * np.pi * R / 100)
+    #: Compute the draft
+    draft = U_inf * decay * oscillation
+    #: Return the result
+    return draft
 
 
