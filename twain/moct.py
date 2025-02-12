@@ -2,14 +2,14 @@
 This is the high-level module for the multi-objective control toolbox (MOCT) of the TWAIN environment.
 """
 
-from typing import TypeVar, TypeAlias, List
-from pathlib import Path
+from typing import TypeVar, TypeAlias, Any
 
 import numpy as np
 import scipy as sp
 import pandas as pd
 import numpy.typing as npt
 from floris import FlorisModel
+from floris.optimization.layout_optimization.layout_optimization_scipy import LayoutOptimizationScipy
 
 # ------ TYPE ALIASES ------
 
@@ -25,29 +25,35 @@ class Scenario:
     """
     DEFAULT_WT_MODEL = 'nrel_5MW'
     
-    def __init__(self, wf_layout: NPArray[float] = None, U_inf: float = None, theta: float = None, TI: float = None, model: tuple[str, ...] = None, perimeter: NPArray[float] = None) -> None:
+    def __init__(self, wf_layout: NPArray[float] = None, U_inf: float = None, theta: float = None, TI: float = None, model: tuple[str, ...] = None, perimeter: NPArray[float] = None, n_wt: int = None, wt_names: list = None, power_lines: list = None) -> None:
         self.wf_layout = pd.DataFrame(wf_layout, columns=['x', 'y'])
         self.U_inf = U_inf
         self.theta = theta
         self.TI = TI
-        self.wt_model = model if model is not None else [self.DEFAULT_WT_MODEL for _ in range(wf_layout.shape[0])]
-        self.n_wt = wf_layout.shape[0]
+        # TODO: We should really add a lot of check, i.e., check consistency between the number of wind turbines, size of array_layout, number of names, etc.
+        self.n_wt = n_wt if n_wt is not None else wf_layout.shape[0]
+        self.wt_model = WindTurbineModel(model) if model is not None else WindTurbineModel(self.DEFAULT_WT_MODEL)
+        # TODO: Combine wind turbine names and wind farm layout in a single DataFrame
+        self.wt_names = wt_names if wt_names is not None else [f'{i:03}' for i in range(self.n_wt)]
         self.wind_rose = None
-        if perimeter is None:
+        if perimeter is None and wf_layout is not None:
             convex_hull_indices = sp.spatial.ConvexHull(wf_layout).vertices
             self.perimeter = np.column_stack([wf_layout[convex_hull_indices, 0], wf_layout[convex_hull_indices, 1]])
         else:
             self.perimeter = perimeter
+        self.power_lines = power_lines
 
 
 class OptProblem:
     """
     Class which stores an optimization problem.
     """
-    def __init__(self, scenario: Scenario, metrics: dict | list, opt_type: str) -> None:
+    def __init__(self, scenario: Scenario, metrics: dict | list, opt_type: str, opt_method: str = None, params: Any = None) -> None:
         self.scenario = scenario
         self.metrics = metrics
         self.opt_type = opt_type
+        self.opt_method = opt_method
+        self.params = params
         #: Flags
         self.is_multi_objective = len(metrics) > 1
         self.is_solved = False
@@ -63,7 +69,24 @@ class OptProblem:
                 #: Return the result
                 return opt_results
             case 'wake_steering':
-                raise NotImplementedError("Wake steering optimization not yet implemented")
+                #: Run the optimization method
+                opt_results = optimal_wake_steering(self)
+                #: Return the result
+                return opt_results
+            case 'layout':
+                #: Run the optimization method
+                control_setpoints, scenario = optimal_greedy_layout(self)
+                #: Return the result
+                return control_setpoints, scenario
+            case 'power_lines':
+                #: Extract the groups
+                groups = self.params
+                #: Run the optimization method
+                vertices_power_lines = optimal_power_lines(self, groups)
+                #: Update the scenario
+                self.scenario.power_lines = vertices_power_lines
+                #: Return the result
+                return None, self.scenario
             case _:
                 raise ValueError(f"Unrecognized optimization type '{self.opt_type}'")
 
@@ -77,6 +100,21 @@ class ControlSetpoints:
         self.power_setpoints = power_setpoints
 
 
+class WindTurbineModel:
+    """
+    Class which stores the wind turbine model.
+    """
+    # TODO: This really inherit from PyWake and FLORIS, i.e., superclasses
+    def __init__(self, model: str) -> None:
+        self.model = model
+        match model:
+            case 'nrel_5MW':
+                self.hub_height = 90.0
+                self.rotor_diameter = 63.0
+            case _:
+                raise ValueError(f"Unrecognized wind turbine model '{model}'")
+
+
 class WindFarmModel:
     """
     Class which stores the wind farm model.
@@ -87,6 +125,7 @@ class WindFarmModel:
         self.scenario = scenario
         self.wake_surrogate = wake_surrogate if wake_surrogate is not None else self.DEFAULT_WAKE_SURROGATE
 
+    # TODO: This should really be separate functions, if we're interested in separate 'impacts'
     def impact_control_variables(self, control_setpoints: ControlSetpoints, N_grid: int = 100) -> NPArray[float]:
         """
         Function to compute the impact of the control variables on the wind farm.
@@ -111,20 +150,26 @@ class WindFarmModel:
                 fmodel.run()
                 #: Extract the powers and local wind speeds
                 wt_power, wt_wind_speed = fmodel.get_turbine_powers(), np.zeros(self.scenario.n_wt)
-                # TEMP
-                #
-                import floris.layout_visualization as layoutviz
-                from floris.flow_visualization import visualize_cut_plane
-                x, y = fmodel.get_turbine_layout()
-                print("     x       y")
-                for _x, _y in zip(x, y):
-                    print(f"{_x:6.1f}, {_y:6.1f}")
-                horizontal_plane = fmodel.calculate_horizontal_plane(height=90.0)
-                import matplotlib.pyplot as plt
-                layoutviz.plot_turbine_points(fmodel)
-                visualize_cut_plane(horizontal_plane, title="270 - Aligned")
-                plt.show()
-                #
+                # # TEMP
+                # #
+                # print(f"control_setpoints.yaw_angles: {control_setpoints.yaw_angles}")
+                # print(f"fmodel.core.farm.yaw_angles: {fmodel.core.farm.yaw_angles}")
+                # import floris.layout_visualization as layoutviz
+                # from floris.flow_visualization import visualize_cut_plane
+                # x, y = fmodel.get_turbine_layout()
+                # print("     x       y")
+                # for _x, _y in zip(x, y):
+                #     print(f"{_x:6.1f}, {_y:6.1f}")
+                # horizontal_plane = fmodel.calculate_horizontal_plane(height=90.0)
+                # import matplotlib.pyplot as plt
+                # layoutviz.plot_turbine_points(fmodel)
+                # visualize_cut_plane(horizontal_plane, title="270 - Aligned")
+                # ax = plt.gca()
+                # ax.set_aspect('auto')
+                # ax.set_xlim([0, 500])
+                # ax.set_ylim([0, 500])
+                # plt.show()
+                # #
                 #: Construct the load surrogate model
                 lmodel = LoadSurrogateModel()
                 #: Extract the loads
@@ -153,6 +198,34 @@ class WindFarmModel:
         wf_noise = 4 * np.clip(wf_noise + 12, 0, Z.max())
         #: Return the results
         return wt_power, wt_load, (X, Y, wf_noise)
+    
+    def get_flow_field(self, control_setpoints: ControlSetpoints) -> NPArray[float]:
+        #: Calculate the power
+        match self.wake_surrogate:
+            case 'FLORIS':
+                #: Construct the wind farm model from a template
+                fmodel = FlorisModel('./config/floris/config_floris_farm.yaml')
+                #: Set the scenario parameters
+                fmodel.set(layout_x=self.scenario.wf_layout['x'], layout_y=self.scenario.wf_layout['y'])
+                fmodel.set(turbulence_intensities=[self.scenario.TI], wind_directions=[self.scenario.theta], wind_speeds=[self.scenario.U_inf])
+                #: Set the control variables
+                fmodel.set(yaw_angles=[control_setpoints.yaw_angles])
+                if control_setpoints.power_setpoints is True:
+                    fmodel.set_operation_model("simple-derating")
+                    fmodel.set(power_setpoints=[control_setpoints.power_setpoints])
+                #: Run the model
+                fmodel.run()
+                #: Extract the flow field
+                N_POINTS = 1000
+                (X, Y), Z = np.meshgrid(np.linspace(0, 500, N_POINTS), np.linspace(0, 500, N_POINTS), indexing='xy'), np.full(N_POINTS ** 2, 90.0)
+                flow_field = fmodel.sample_flow_at_points(X.flatten(order='F'), Y.flatten(order='F'), Z)
+                flow_field = flow_field.reshape(N_POINTS, N_POINTS, order='F')
+            case 'PyWake':
+                raise NotImplementedError("PyWake wake surrogate not yet implemented")
+            case _:
+                raise ValueError(f"Unrecognized wake surrogate model '{self.wake_surrogate}'")
+        #: Return the results
+        return X, Y, flow_field
     
 
 class LoadSurrogateModel:
@@ -225,6 +298,77 @@ def optimal_downregulation(problem: OptProblem, N_iter: int = 100) -> ControlSet
     return control_setpoints
 
 
+def optimal_wake_steering(problem: OptProblem, N_iter: int = 100) -> ControlSetpoints:
+    """
+    Function to solve the downregulation optimization problem.
+    """
+    #: Create the initial set of control setpoints, greedy control
+    control_setpoints = ControlSetpoints(yaw_angles=np.random.uniform(-40, 40, problem.scenario.n_wt), power_setpoints=np.ones(problem.scenario.n_wt))
+    #: Create a surrogate wind farm and metrics model
+    wf_model, metrics = WindFarmModel(problem.scenario, wake_surrogate='FLORIS'), Metrics()
+    #: Initialize the variables
+    aep = np.zeros(N_iter) 
+    #: Perform iteration
+    for iter in range(N_iter):
+        #: Compute the power production
+        wt_power, _, _ = wf_model.impact_control_variables(control_setpoints)
+        #: Map the power production to metrics
+        aep[iter] = metrics.compute_aep(wt_power)
+        #: Based on the AEP, compute the next control setpoints
+        control_setpoints = ControlSetpoints(yaw_angles=np.random.uniform(-40, 40, problem.scenario.n_wt), power_setpoints=np.ones(problem.scenario.n_wt))
+    #: Return the results
+    return control_setpoints
+
+
+def optimal_greedy_layout(problem: OptProblem, N_iter: int = 100) -> tuple[ControlSetpoints, Scenario]:
+    """
+    Function to solve the greedy layout optimization problem.
+    """
+    #: Select which method to use
+    match problem.opt_method:
+        case 'scipy':
+            # NOTE: This assumes we use FLORIS for the wind farm surrogate model
+            #: Create a FLORIS model
+            fmodel = FlorisModel('./config/floris/config_floris_farm.yaml')
+            #: Set the minimum separation distance
+            min_dist = 2 * problem.scenario.wt_model.rotor_diameter
+            #: Set the number of wind turbines
+            fmodel.set(layout_x=np.random.uniform(0, 500, problem.scenario.n_wt), layout_y=np.random.uniform(0, 500, problem.scenario.n_wt))
+            opt_problem = LayoutOptimizationScipy(fmodel, [vertex for vertex in problem.scenario.perimeter], min_dist=min_dist)
+            #: Retrieve the optimal locations
+            optimal_layout = opt_problem.optimize()
+            #: Set the optimal layout for the scenario
+            problem.scenario.wf_layout = pd.DataFrame([list(x) for x in zip(*optimal_layout)], columns=['x', 'y'])
+            #: Set the control variables
+            control_setpoints = ControlSetpoints(yaw_angles=np.zeros(problem.scenario.n_wt), power_setpoints=np.random.uniform(0, 1, problem.scenario.n_wt))
+        case _:
+            raise ValueError(f"Unrecognized optimization method '{problem.opt_method}'")
+    #: Return the results
+    return control_setpoints, problem.scenario
+
+
+def optimal_power_lines(problem: OptProblem, groups: list) -> list:
+    """
+    This computes the optimal power line placement based on the groups.
+
+    Parameters
+    ----------
+    problem : OptProblem
+        all the parameters from the optimization problem, which includes the scenario
+    groups : list
+        a nested list of the format [group_1, group_2, ...], where each group is a list of wind turbine names, i.e., group_i = ['001', '002', ...]
+
+    Returns
+    -------
+    vertices_power_lines : list
+        a list of length len(groups) containing the optimal power line vertices for each group. Within each group, there is a main power line [the first element], and then a list with additional power lines [the rest of the elements]
+    """
+    #: Call a dummy function
+    vertices_power_lines = placeholder_power_lines_llstq(problem.scenario, groups)
+    #: Return the results
+    return vertices_power_lines
+
+
 # ------ PLACEHOLDERS ------
 
 
@@ -232,6 +376,7 @@ def placeholder_oscilation_decay_2d(X: NPArray[float], Y: NPArray[float], wt_loc
     """
     Function to compute the 2D draft oscillation decay.
     """
+    # FROM: GitHub Copilot GPT 4o
     #: Compute the distance
     R = np.sqrt((X - wt_loc[0]) ** 2 + (Y - wt_loc[1]) ** 2)
     #: Compute the angle
@@ -244,5 +389,42 @@ def placeholder_oscilation_decay_2d(X: NPArray[float], Y: NPArray[float], wt_loc
     draft = U_inf * decay * oscillation
     #: Return the result
     return draft
+
+
+def placeholder_power_lines_llstq(scenario: Scenario, groups: list) -> list:
+    """
+    This computes the optimal power line placement based on the groups.
+    """
+
+    def point_on_line(a, b, p):
+        # FROM: https://stackoverflow.com/questions/61341712/calculate-projected-point-location-x-y-on-given-line-startx-y-endx-y  # nopep8
+        ap = p - a
+        ab = b - a
+        result = a + np.dot(ap, ab) / np.dot(ab, ab) * ab
+        return result
+
+    #: Initialize an empty list 
+    vertices_power_lines = []
+    #: Loop over all the groups
+    for group in groups:
+        #: Get the indices of these wind farms
+        indices_wt = [i for i, wt_name in enumerate(scenario.wt_names) if wt_name in group]
+        #: Extract the wind turbine locations
+        wt_locations = scenario.wf_layout.iloc[indices_wt].to_numpy()
+        n_wt_group = wt_locations.shape[0]
+        #: Perform LLSTQ
+        coeffs = np.linalg.lstsq(np.column_stack([np.ones(n_wt_group), wt_locations[:, 0]]), wt_locations[:, 1])[0]
+        #: Compute the endpoints
+        end_left, end_right = np.array([0, coeffs[0]]), np.array([500, 500 * coeffs[1] + coeffs[0]])
+        #: Project all the points to this line
+        wt_group_intersect = np.zeros((n_wt_group, 2))
+        for idx in range(n_wt_group):
+            wt_group_intersect[idx, :] = point_on_line(end_left, end_right, wt_locations[idx])
+        #: Select the new right power line
+        end_right = wt_group_intersect[np.argmax(wt_group_intersect[:, 0]), :]
+        #: Construct the array
+        vertices_power_lines += [[np.row_stack([end_left, end_right]), [np.row_stack([wt_group_intersect[idx, :], wt_locations[idx, :]]) for idx in range(n_wt_group)]]]
+    #: Return the results
+    return vertices_power_lines
 
 

@@ -1,12 +1,14 @@
 """
-This is an example script to create a downregulation scenario, with a fixed.
+This is a script for offline co-design optimization.
 
-# FIXME: Not actually doing any downregulation
+# FIXME: Not working, FLORIS does not do any optimization, and no wind-rose is provided.
 """
 
 # Import packages
 from pathlib import Path
 
+import numpy as np
+import scipy as sp
 import pandas as pd
 from yaml import safe_load
 import matplotlib.pyplot as plt
@@ -15,9 +17,6 @@ from twain import moct, plot
 
 # ------------ PARAMETERS ------------
 
-# Select the wind-farm layout
-layout = 'data/example_site_1/wf_layout.csv'
-
 # Select the scenario parameters
 U_inf = 12.0  # Mean wind speed, in m/s
 theta = 210  # Wind direction, in degrees
@@ -25,36 +24,14 @@ turb_intensity = 0.06  # Turbulence intensity
 
 # ------------ SCRIPT ------------
 
-# Convert to path
-path_layout = Path(layout)
-
-# Load the wind-farm layout
-match path_layout.suffix:
-    case '.yaml':
-        # FIXME: Not working
-        with open(layout, 'r') as file:
-            df_layout = pd.json_normalize(safe_load(file))
-    case '.csv':
-        df_layout = pd.read_csv(layout, sep=';')
-    case _:
-        raise ValueError(f"Unrecognized file format '{path_layout.suffix}")
-    
-# Convert to numpy array
-array_layout = df_layout[['x', 'y']].to_numpy()
-
 # Create the scenario
-scenario = moct.Scenario(wf_layout=array_layout, U_inf=U_inf, theta=theta, TI=turb_intensity)
+scenario = moct.Scenario(U_inf=U_inf, theta=theta, n_wt=10, perimeter=np.array([[0, 0], [500, 0], [500, 500], [0, 500]]))
 
 # Construct an optimization problem
-problem = moct.OptProblem(scenario, metrics=['aep'], opt_type='downregulation')
+problem = moct.OptProblem(scenario, metrics=['aep'], opt_type='layout', opt_method='scipy')
 
 # Solve the problem
-optimal_control_setpoints = problem.solve()
-
-# TEMP
-#
-print(scenario.wt_names)
-#
+optimal_control_setpoints, scenario = problem.solve()
 
 # ------------ PLOTTING ------------
 

@@ -1,7 +1,5 @@
 """
-This is an example script to create a downregulation scenario, with a fixed.
-
-# FIXME: Not actually doing any downregulation
+Example script for yaw steering co-design.
 """
 
 # Import packages
@@ -46,21 +44,16 @@ array_layout = df_layout[['x', 'y']].to_numpy()
 scenario = moct.Scenario(wf_layout=array_layout, U_inf=U_inf, theta=theta, TI=turb_intensity)
 
 # Construct an optimization problem
-problem = moct.OptProblem(scenario, metrics=['aep'], opt_type='downregulation')
+problem = moct.OptProblem(scenario, metrics=['aep'], opt_type='wake_steering', opt_method='pso')
 
 # Solve the problem
 optimal_control_setpoints = problem.solve()
-
-# TEMP
-#
-print(scenario.wt_names)
-#
 
 # ------------ PLOTTING ------------
 
 # Plot the wind-farm layout
 fig_layout, ax_layout = plt.subplots()
-ax_layout = plot.layout(scenario, ax_exist=ax_layout)
+ax_layout = plot.layout(scenario, optimal_control_setpoints, ax_exist=ax_layout)
 fig_layout.suptitle("Wind-farm layout")
 
 # Plot the noise field
@@ -69,7 +62,15 @@ ax_noise.set_xlim([0, 500])
 ax_noise.set_ylim([0, 500])
 fig_noise.suptitle("Noise field")
 
+# Plot the flow field
+# FIXME: The yaw offset seems to have no effect on the wake?
+fig_flow, ax_flow = plot.flow_field(scenario, optimal_control_setpoints, clip=False)
+ax_flow.set_xlim([0, 500])
+ax_flow.set_ylim([0, 500])
+fig_flow.suptitle("Flow field")
+
 # Show the plots
 # plt.close(fig_layout)
 # plt.close(fig_noise)
+# plt.close(fig_flow)
 plt.show()

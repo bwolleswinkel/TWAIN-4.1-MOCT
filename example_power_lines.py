@@ -1,7 +1,5 @@
 """
-This is an example script to create a downregulation scenario, with a fixed.
-
-# FIXME: Not actually doing any downregulation
+Example script of optimization of power lines.
 """
 
 # Import packages
@@ -43,18 +41,13 @@ match path_layout.suffix:
 array_layout = df_layout[['x', 'y']].to_numpy()
 
 # Create the scenario
-scenario = moct.Scenario(wf_layout=array_layout, U_inf=U_inf, theta=theta, TI=turb_intensity)
+scenario = moct.Scenario(wf_layout=array_layout, U_inf=U_inf, theta=theta)
 
 # Construct an optimization problem
-problem = moct.OptProblem(scenario, metrics=['aep'], opt_type='downregulation')
+problem = moct.OptProblem(scenario, metrics=['aep'], opt_type='power_lines', params=[['000', '008', '006', '003'], ['001', '005', '007', '002', '009', '004']])
 
 # Solve the problem
-optimal_control_setpoints = problem.solve()
-
-# TEMP
-#
-print(scenario.wt_names)
-#
+_, scenario = problem.solve()
 
 # ------------ PLOTTING ------------
 
@@ -62,12 +55,6 @@ print(scenario.wt_names)
 fig_layout, ax_layout = plt.subplots()
 ax_layout = plot.layout(scenario, ax_exist=ax_layout)
 fig_layout.suptitle("Wind-farm layout")
-
-# Plot the noise field
-fig_noise, ax_noise = plot.noise_field(scenario, optimal_control_setpoints)
-ax_noise.set_xlim([0, 500])
-ax_noise.set_ylim([0, 500])
-fig_noise.suptitle("Noise field")
 
 # Show the plots
 # plt.close(fig_layout)
