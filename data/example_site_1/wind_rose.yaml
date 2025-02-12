@@ -1,6 +1,6 @@
 ---
 table:
-  cols: ['direction', 'wind_speed', 'frequency']
+  cols: ['direction', 'wind_speeds', 'frequency']
   units: ['degree', 'm/s', '-']
   rows:
     - [0, 0.5, 0.1]

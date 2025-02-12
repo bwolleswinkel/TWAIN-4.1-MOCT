@@ -13,8 +13,9 @@ from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from matplotlib.path import Path as mpltPath
+import matplotlib.tri as tri
 
-from twain.moct import Scenario, ControlSetpoints, WindFarmModel
+from twain.moct import Scenario, ControlSetpoints, WindFarmModel, WindRose
 
 # ------ STATIC ------
 
@@ -124,6 +125,40 @@ def flow_field(scenario: Scenario, control_setpoints: ControlSetpoints, ax_exist
     ax.plot(array_layout[:, 0], array_layout[:, 1], 'x', markersize=4, color='blue', linewidth=16, zorder=3)
     #: Plot the contour
     ax.plot(np.append(scenario.perimeter[:, 0], scenario.perimeter[0, 0]), np.append(scenario.perimeter[:, 1], scenario.perimeter[0, 1]), 'r--', lw=2)
+    #: Return the axis
+    if ax_exist is not None:
+        return ax
+    else:
+        return fig, ax
+    
+
+def wind_rose(wind_rose: WindRose, ax_exist: Axes = None) -> tuple[Figure, Axes]:
+    #: Add to existing axes (if they exist)
+    if ax_exist is not None:
+        #: Set equal
+        fig, ax = None, ax_exist
+    else:
+        #: Create a figure
+        fig = plt.figure()
+        ax = fig.add_subplot(projection='polar')
+    #: Set oriantation parameters
+    # FROM: https://gist.github.com/phobson/41b41bdd157a2bcf6e14  # nopep8
+    ax.set_theta_direction('clockwise')
+    ax.set_theta_zero_location('N')
+    #: Unravel the data
+    # TEMP
+    #
+    print(wind_rose.wind_rose)
+    print(wind_rose.wind_speeds)
+    #
+    X, Y = np.meshgrid(wind_rose.wind_rose['direction'], wind_rose.wind_speeds, indexing='xy')
+    Z = np.zeros(X.shape)
+    for idx, _ in np.ndenumerate(Z):
+        Z[idx] = wind_rose.wind_rose.iloc[idx[1]]['frequencies'][idx[0]]
+    #: Create a contour plot
+    ax.tricontourf(X.flatten(order='F'), Y.flatten(order='F'), Z.flatten(order='F'), origin='lower')
+    #: Set the labels
+    ax.set_xticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
     #: Return the axis
     if ax_exist is not None:
         return ax

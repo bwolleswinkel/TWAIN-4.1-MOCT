@@ -8,7 +8,7 @@ import numpy as np
 import scipy as sp
 import pandas as pd
 import numpy.typing as npt
-from floris import FlorisModel
+from floris import FlorisModel, WindRose as FlorisWindRose
 from floris.optimization.layout_optimization.layout_optimization_scipy import LayoutOptimizationScipy
 
 # ------ TYPE ALIASES ------
@@ -42,6 +42,18 @@ class Scenario:
         else:
             self.perimeter = perimeter
         self.power_lines = power_lines
+
+
+class WindRose(FlorisWindRose):
+    """
+    Class which stores a wind rose. This class also 'eats up' the other classes 
+    """
+    def __init__(self, wind_rose: dict) -> None:
+        #: Convert the dictionary to a DataFrame
+        wind_speeds = np.array(wind_rose['wind_speeds'])
+        df_wind_rose = pd.DataFrame(wind_rose['wind_rose'], columns=['direction', 'frequencies'])
+        self.wind_rose = df_wind_rose
+        self.wind_speeds = wind_speeds
 
 
 class OptProblem:
