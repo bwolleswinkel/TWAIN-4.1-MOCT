@@ -18,7 +18,7 @@ layout = 'data/example_site_1/wf_layout.csv'
 
 # Select the scenario parameters
 U_inf = 12.0  # Mean wind speed, in m/s
-theta = 210  # Wind direction, in degrees
+theta = 270  # Wind direction, in degrees
 turb_intensity = 0.06  # Turbulence intensity
 
 # ------------ SCRIPT ------------
@@ -47,10 +47,7 @@ scenario = moct.Scenario(wf_layout=array_layout, U_inf=U_inf, theta=theta, TI=tu
 problem = moct.OptProblem(scenario, metrics=['aep'], opt_type='wake_steering', opt_method='pso')
 
 # Solve the problem
-optimal_control_setpoints = problem.solve()
-
-# TEMP
-print(scenario)
+optimal_control_setpoints = problem.solve(verbose=1)
 
 # ------------ PLOTTING ------------
 

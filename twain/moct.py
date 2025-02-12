@@ -8,6 +8,7 @@ import numpy as np
 import scipy as sp
 import pandas as pd
 import numpy.typing as npt
+from tqdm import tqdm
 from floris import FlorisModel, WindRose as FlorisWindRose
 from floris.optimization.layout_optimization.layout_optimization_scipy import LayoutOptimizationScipy
 
@@ -76,7 +77,7 @@ class OptProblem:
         self.is_multi_objective = len(metrics) > 1
         self.is_solved = False
 
-    def solve(self) -> None:
+    def solve(self, verbose: int = 0) -> None:
         """
         Function to solve the optimization problem.
         """
@@ -88,7 +89,7 @@ class OptProblem:
                 return opt_results
             case 'wake_steering':
                 #: Run the optimization method
-                opt_results = optimal_wake_steering(self)
+                opt_results = optimal_wake_steering(self, verbose=verbose)
                 #: Return the result
                 return opt_results
             case 'layout':
@@ -168,26 +169,6 @@ class WindFarmModel:
                 fmodel.run()
                 #: Extract the powers and local wind speeds
                 wt_power, wt_wind_speed = fmodel.get_turbine_powers(), np.zeros(self.scenario.n_wt)
-                # # TEMP
-                # #
-                # print(f"control_setpoints.yaw_angles: {control_setpoints.yaw_angles}")
-                # print(f"fmodel.core.farm.yaw_angles: {fmodel.core.farm.yaw_angles}")
-                # import floris.layout_visualization as layoutviz
-                # from floris.flow_visualization import visualize_cut_plane
-                # x, y = fmodel.get_turbine_layout()
-                # print("     x       y")
-                # for _x, _y in zip(x, y):
-                #     print(f"{_x:6.1f}, {_y:6.1f}")
-                # horizontal_plane = fmodel.calculate_horizontal_plane(height=90.0)
-                # import matplotlib.pyplot as plt
-                # layoutviz.plot_turbine_points(fmodel)
-                # visualize_cut_plane(horizontal_plane, title="270 - Aligned")
-                # ax = plt.gca()
-                # ax.set_aspect('auto')
-                # ax.set_xlim([0, 500])
-                # ax.set_ylim([0, 500])
-                # plt.show()
-                # #
                 #: Construct the load surrogate model
                 lmodel = LoadSurrogateModel()
                 #: Extract the loads
@@ -275,7 +256,7 @@ class Metrics:
         Function to compute the annual energy production.
         """
         #: Compute the annual power production
-        aep = np.sum(wt_power)
+        aep = np.sum(wt_power) * 31_536_000
         #: Return the result
         return aep
     
@@ -316,24 +297,60 @@ def optimal_downregulation(problem: OptProblem, N_iter: int = 100) -> ControlSet
     return control_setpoints
 
 
-def optimal_wake_steering(problem: OptProblem, N_iter: int = 100) -> ControlSetpoints:
+def optimal_wake_steering(problem: OptProblem, N_iter: int = 100, N_swarm: int = 100, w_vel_old: float = 0.5, w_vel_best_local: float = 0.1, w_vel_best_global: float = 0.1, verbose: int = 0) -> ControlSetpoints:
     """
     Function to solve the downregulation optimization problem.
     """
-    #: Create the initial set of control setpoints, greedy control
-    control_setpoints = ControlSetpoints(yaw_angles=np.random.uniform(-40, 40, problem.scenario.n_wt), power_setpoints=np.ones(problem.scenario.n_wt))
-    #: Create a surrogate wind farm and metrics model
-    wf_model, metrics = WindFarmModel(problem.scenario, wake_surrogate='FLORIS'), Metrics()
-    #: Initialize the variables
-    aep = np.zeros(N_iter) 
-    #: Perform iteration
-    for iter in range(N_iter):
-        #: Compute the power production
-        wt_power, _, _ = wf_model.impact_control_variables(control_setpoints)
-        #: Map the power production to metrics
-        aep[iter] = metrics.compute_aep(wt_power)
-        #: Based on the AEP, compute the next control setpoints
-        control_setpoints = ControlSetpoints(yaw_angles=np.random.uniform(-40, 40, problem.scenario.n_wt), power_setpoints=np.ones(problem.scenario.n_wt))
+    YAW_LOWER_LIMIT, YAW_UPPER_LIMIT = -30, 30
+
+    #: Select the method
+    match problem.opt_method:
+        case 'pso':
+            #: Create a surrogate wind farm and metrics model
+            wf_model, metrics = WindFarmModel(problem.scenario, wake_surrogate='FLORIS'), Metrics()
+            #: Initialize the swarm
+            yaw_now, cost_now, idx_iter_best = np.zeros((problem.scenario.n_wt, N_swarm, N_iter)), np.zeros((N_swarm, N_iter)), np.zeros((N_swarm, N_iter), dtype=int)
+            yaw_now[:, :, 0] = np.random.uniform(YAW_LOWER_LIMIT, YAW_UPPER_LIMIT, (problem.scenario.n_wt, N_swarm))
+            #: Initialize the velocity
+            velocity_now = np.random.uniform(-abs(YAW_UPPER_LIMIT - YAW_LOWER_LIMIT), abs(YAW_UPPER_LIMIT - YAW_LOWER_LIMIT), (problem.scenario.n_wt, N_swarm))
+            #: Loop over all the iterations
+            for iter in tqdm(range(N_iter), desc="Iteration", disable=verbose == 0):
+                #: Loop over all the particles
+                for particle in tqdm(range(N_swarm), desc="Particle", leave=False, disable=verbose == 0):
+                    #: Compute the power production
+                    wt_power, _, _ = wf_model.impact_control_variables(ControlSetpoints(yaw_angles=yaw_now[:, particle, iter], power_setpoints=np.ones(problem.scenario.n_wt)))
+                    #: Map the power production to metrics
+                    # TEMP
+                    cost_now[particle, iter] = metrics.compute_aep(wt_power) * 1E-14
+                    #: Check if this is the particles best score since now
+                    if cost_now[particle, iter] > cost_now[particle, idx_iter_best[particle, max([0, iter - 1])]]:
+                        idx_iter_best[particle, iter] = iter
+                    else:
+                        idx_iter_best[particle, iter] = idx_iter_best[particle, iter - 1]
+                #: Compute the global best
+                best_costs = np.array([cost_now[particle, idx_iter_best[particle, iter]] for particle in range(N_swarm)])
+                particle_best = np.argmax(best_costs)
+                global_best = yaw_now[:, particle_best, idx_iter_best[particle_best, iter]]
+                #: Loop over all the particles
+                for particle in range(N_swarm):
+                    #: Select random scaling
+                    rand_local, rand_global = np.random.uniform(0, 1), np.random.uniform(0, 1)
+                    #: Update the velocity
+                    velocity_now[:, particle] = w_vel_old * velocity_now[:, particle] + rand_local * w_vel_best_local * (yaw_now[:, particle, idx_iter_best[particle, iter]] - yaw_now[:, particle, iter]) + rand_global * w_vel_best_global * (global_best - yaw_now[:, particle, iter])
+                    #: Update the yaw
+                    if iter < N_iter - 1:
+                        yaw_now[:, particle, iter + 1] = np.clip(yaw_now[:, particle, iter] + velocity_now[:, particle], YAW_LOWER_LIMIT, YAW_UPPER_LIMIT)
+            #: Create the operating setpoints
+            control_setpoints = ControlSetpoints(yaw_angles=global_best, power_setpoints=np.ones(problem.scenario.n_wt))
+        case _:
+            raise ValueError(f"Unrecognized optimization method '{problem.opt_method}'")
+    # TEMP
+    #
+    cost_best = np.array([[cost_now[particle, idx_iter_best[particle, iter]] for particle in range(N_swarm)] for iter in range(N_iter)]).T
+    import matplotlib.pyplot as plt
+    plt.plot(np.max(cost_best, axis=0))
+    plt.show()
+    #
     #: Return the results
     return control_setpoints
 

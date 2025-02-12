@@ -7,3 +7,4 @@ pyyaml
 pandas
 matplotlib
 floris
+tqdm (not strictly nesessary)
