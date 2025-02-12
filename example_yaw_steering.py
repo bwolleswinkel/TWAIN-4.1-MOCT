@@ -49,6 +49,9 @@ problem = moct.OptProblem(scenario, metrics=['aep'], opt_type='wake_steering', o
 # Solve the problem
 optimal_control_setpoints = problem.solve()
 
+# TEMP
+print(scenario)
+
 # ------------ PLOTTING ------------
 
 # Plot the wind-farm layout

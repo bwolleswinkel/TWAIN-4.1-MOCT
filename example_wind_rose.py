@@ -36,6 +36,11 @@ match path_layout.suffix:
 # Construct the wind-rose object
 wind_rose = moct.WindRose(wind_rose)
 
+# ------------ PRINTING ------------
+
+# Print the wind-rose data
+print(wind_rose)
+
 # ------------ PLOTTING ------------
 
 # Plot the wind-farm layout

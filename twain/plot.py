@@ -146,11 +146,6 @@ def wind_rose(wind_rose: WindRose, ax_exist: Axes = None) -> tuple[Figure, Axes]
     ax.set_theta_direction('clockwise')
     ax.set_theta_zero_location('N')
     #: Unravel the data
-    # TEMP
-    #
-    print(wind_rose.wind_rose)
-    print(wind_rose.wind_speeds)
-    #
     X, Y = np.meshgrid(wind_rose.wind_rose['direction'], wind_rose.wind_speeds, indexing='xy')
     Z = np.zeros(X.shape)
     for idx, _ in np.ndenumerate(Z):

@@ -43,6 +43,9 @@ class Scenario:
             self.perimeter = perimeter
         self.power_lines = power_lines
 
+    def __str__(self) -> str:
+        return f"<class: {self.__class__.__name__}> | Scenario object with {self.n_wt if self.n_wt is not None and self.n_wt > 0 else 'unspecified number of'} wind turbines\n" + f"+------------+\n" + f"{''.join(['|            |\n' for _ in range(4)])}" + f"+------------+"
+
 
 class WindRose(FlorisWindRose):
     """
@@ -54,6 +57,9 @@ class WindRose(FlorisWindRose):
         df_wind_rose = pd.DataFrame(wind_rose['wind_rose'], columns=['direction', 'frequencies'])
         self.wind_rose = df_wind_rose
         self.wind_speeds = wind_speeds
+
+    def __str__(self) -> str:
+        return f"<class: {self.__class__.__name__}> | Wind rose object with {self.wind_rose.shape[0]} direction bins and {self.wind_speeds.shape[0]} wind speed bins\n" + f"{self.wind_rose.__str__()}"
 
 
 class OptProblem:
