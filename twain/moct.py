@@ -314,9 +314,9 @@ def optimal_wake_steering(problem: OptProblem, N_iter: int = 100, N_swarm: int =
             #: Initialize the velocity
             velocity_now = np.random.uniform(-abs(YAW_UPPER_LIMIT - YAW_LOWER_LIMIT), abs(YAW_UPPER_LIMIT - YAW_LOWER_LIMIT), (problem.scenario.n_wt, N_swarm))
             #: Loop over all the iterations
-            for iter in tqdm(range(N_iter), desc="Iterations", disable=verbose == 0):
+            for iter in tqdm(range(N_iter), desc="Iterations", colour='cyan', disable=verbose == 0):
                 #: Loop over all the particles
-                for particle in tqdm(range(N_swarm), desc="Particles", leave=False, disable=verbose == 0):
+                for particle in tqdm(range(N_swarm), desc="Particles", colour='magenta', leave=False, disable=verbose == 0):
                     #: Compute the power production
                     wt_power, _, _ = wf_model.impact_control_variables(ControlSetpoints(yaw_angles=yaw_now[:, particle, iter], power_setpoints=np.ones(problem.scenario.n_wt)))
                     #: Map the power production to metrics
