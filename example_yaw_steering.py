@@ -44,7 +44,7 @@ array_layout = df_layout[['x', 'y']].to_numpy()
 scenario = moct.Scenario(wf_layout=array_layout, U_inf=U_inf, theta=theta, TI=turb_intensity)
 
 # Construct an optimization problem
-problem = moct.OptProblem(scenario, metrics=['aep'], opt_type='wake_steering', opt_method='pso')
+problem = moct.OptProblem(scenario, metrics=['aep'], opt_type='wake_steering', opt_method='pso', params={'N_swarm': 20, 'N_iter': 20})
 
 # Solve the problem
 optimal_control_setpoints = problem.solve(verbose=1)

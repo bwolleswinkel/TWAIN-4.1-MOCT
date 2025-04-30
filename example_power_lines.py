@@ -1,5 +1,5 @@
-"""
-Example script of optimization of power lines.
+"""Example script of optimization of power lines.
+
 """
 
 # Import packages

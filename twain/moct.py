@@ -2,6 +2,7 @@
 This is the high-level module for the multi-objective control toolbox (MOCT) of the TWAIN environment.
 """
 
+from __future__ import annotations
 from typing import TypeVar, TypeAlias, Any
 
 import numpy as np
@@ -52,15 +53,31 @@ class WindRose(FlorisWindRose):
     """
     Class which stores a wind rose. This class also 'eats up' the other classes 
     """
-    def __init__(self, wind_rose: dict) -> None:
-        #: Convert the dictionary to a DataFrame
-        wind_speeds = np.array(wind_rose['wind_speeds'])
-        df_wind_rose = pd.DataFrame(wind_rose['wind_rose'], columns=['direction', 'frequencies'])
-        self.wind_rose = df_wind_rose
-        self.wind_speeds = wind_speeds
+    def __init__(self, wind_rose: dict | pd.DataFrame) -> None:
+        #: Match the type of file
+        match wind_rose:
+            case dict():
+                #: Convert the dictionary to a DataFrame
+                wind_speeds = np.array(wind_rose['wind_speeds'])
+                # FIXME: This does not actually work, does not have the right information
+                df_wind_rose = pd.DataFrame(wind_rose['wind_rose'], columns=['direction', 'frequencies'])
+                self.wind_rose = df_wind_rose
+                self.wind_speeds = wind_speeds
+            case pd.DataFrame():
+                #: Save the dataframe
+                self.wind_rose = wind_rose
+                #: Check the number of bins
+                n_bins_wd, n_bins_ws = np.unique(wind_rose['wind_dir']).size, np.unique(wind_rose['wind_speed']).size
+                self.n_bins_wd = n_bins_wd
+                self.n_bins_ws = n_bins_ws
+                #: Create an array with all the prevalence values
+                # FIXME: We need to flip thus up/down because the wind speeds need to be in increasing order
+                self.data = np.flipud(wind_rose['prevalence'].to_numpy().reshape((n_bins_ws, n_bins_wd), order='F'))
+            case _:
+                raise ValueError(f"Unrecognized wind rose format '{type(wind_rose)}'")
 
     def __str__(self) -> str:
-        return f"<class: {self.__class__.__name__}> | Wind rose object with {self.wind_rose.shape[0]} direction bins and {self.wind_speeds.shape[0]} wind speed bins\n" + f"{self.wind_rose.__str__()}"
+        return f"<class: {self.__class__.__name__}> | Wind rose object with {self.n_bins_wd} direction bins and {self.n_bins_ws} wind speed bins\n" + f"{self.wind_rose.__str__()}"
 
 
 class OptProblem:
@@ -270,6 +287,39 @@ class Metrics:
         lcoe = 1.0 * aep
         #: Return the result
         return lcoe
+    
+
+class SpatialArray:
+    """ Class which stores an array value f, based on coordinates x, y (and z), and has special slicing operations.
+
+    # TODO: Subclass a numpy array, and implement the __getitem__ method to allow for slicing
+    # FROM: https://numpy.org/doc/stable/user/basics.subclassing.html
+    """
+    
+    def __init__(self, spatial: list[NPArray[float], ...], data: NPArray[float]) -> SpatialArray:
+        if len(spatial) == 2:
+            self.X, self.Y = spatial
+        elif len(spatial) == 3:
+            self.X, self.Y, self.Z = spatial
+        self.data = data
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        return self.data.shape
+
+    def __getitem__(self, key) -> NPArray:
+        if isinstance(key, int) or (isinstance(key, tuple) and all(isinstance(elem, int) for elem in key)):
+            return self.data[key]
+        elif isinstance(key, float) or (isinstance(key, tuple) and all(isinstance(elem, float) for elem in key)):
+            if len(key) == 2:
+                indices = (np.argmin(np.abs(self.X - key[0]), axis=1)[0], np.argmin(np.abs(self.Y - key[1]), axis=0)[0])
+            elif len(key) == 3:
+                raise NotImplementedError(f"Searching in a 3D Spatial array is not implemented")
+            return self.data[indices]
+        elif isinstance(key, slice):
+            raise NotImplementedError("Slicing not yet implemented")
+        else:
+            raise ValueError(f"Unrecognized slicing operation '{key}'")
 
 
 # ------ FUNCTIONS ------
@@ -279,22 +329,67 @@ def optimal_downregulation(problem: OptProblem, N_iter: int = 100) -> ControlSet
     """
     Function to solve the downregulation optimization problem.
     """
-    #: Create the initial set of control setpoints, greedy control
-    control_setpoints = ControlSetpoints(yaw_angles=np.zeros(problem.scenario.n_wt), power_setpoints=np.ones(problem.scenario.n_wt))
-    #: Create a surrogate wind farm and metrics model
-    wf_model, metrics = WindFarmModel(problem.scenario, wake_surrogate='FLORIS'), Metrics()
-    #: Initialize the variables
-    aep = np.zeros(N_iter) 
-    #: Perform iteration
-    for iter in range(N_iter):
-        #: Compute the power production
-        wt_power, _, _ = wf_model.impact_control_variables(control_setpoints)
-        #: Map the power production to metrics
-        aep[iter] = metrics.compute_aep(wt_power)
-        #: Based on the AEP, compute the next control setpoints
-        control_setpoints = ControlSetpoints(yaw_angles=np.zeros(problem.scenario.n_wt), power_setpoints=np.random.uniform(0, 1, problem.scenario.n_wt))
-    #: Return the results
-    return control_setpoints
+    #: Match the metric
+    match problem.metrics:
+        case ['aep']:
+            #: Create the initial set of control setpoints, greedy control
+            control_setpoints = ControlSetpoints(yaw_angles=np.zeros(problem.scenario.n_wt), power_setpoints=np.ones(problem.scenario.n_wt))
+            #: Create a surrogate wind farm and metrics model
+            wf_model, metrics = WindFarmModel(problem.scenario, wake_surrogate='FLORIS'), Metrics()
+            #: Initialize the variables
+            aep = np.zeros(N_iter) 
+            #: Perform iteration
+            for iter in range(N_iter):
+                #: Compute the power production
+                wt_power, _, _ = wf_model.impact_control_variables(control_setpoints)
+                #: Map the power production to metrics
+                aep[iter] = metrics.compute_aep(wt_power)
+                #: Based on the AEP, compute the next control setpoints
+                control_setpoints = ControlSetpoints(yaw_angles=np.zeros(problem.scenario.n_wt), power_setpoints=np.random.uniform(0, 1, problem.scenario.n_wt))
+            #: Return the results
+            return control_setpoints
+        case ['noise']:
+            #: Create the initial set of control setpoints, greedy control
+            control_setpoints = ControlSetpoints(yaw_angles=np.zeros(problem.scenario.n_wt), power_setpoints=np.ones(problem.scenario.n_wt))
+            #: Create a surrogate wind farm and metrics model
+            wf_model, metrics = WindFarmModel(problem.scenario, wake_surrogate='FLORIS'), Metrics()
+            #: Create the max-noise variable
+            max_noise = np.nan
+            #: Start the iteration
+            while np.isnan(max_noise) or max_noise > 0.1:
+                #: Compute the noise field
+                _, _, (X_noise, Y_noise, wf_noise) = wf_model.impact_control_variables(control_setpoints)
+                #: Retrieve the mask
+                X_mask, Y_mask, noise_mask = problem.params[0]
+                #: Convert to SpatialArray
+                noise_mask = SpatialArray((X_mask, Y_mask), noise_mask)
+                #: Loop over all values in the noise field
+                for idx, _ in np.ndenumerate(wf_noise):
+                    #: Retrieve the x- and y-values
+                    x, y = X_noise[idx], Y_noise[idx]
+                    #: Check if the point is within the mask
+                    wf_noise[idx] = wf_noise[idx] if noise_mask[x, y] else np.nan
+                # FIXME: Something is wrong, we have to 'flip' the matrix
+                wf_noise = np.rot90(wf_noise, k=1)
+                #: Compute the maximum noise
+                max_noise = np.nanmax(wf_noise)
+                # TEMP
+                #
+                import matplotlib.pyplot as plt
+                from twain import plot
+                indices = np.nanargmax(wf_noise)
+                x_max, y_max = X_noise[np.unravel_index(indices, wf_noise.shape)], Y_noise[np.unravel_index(indices, wf_noise.shape)]
+                fig, ax = plt.subplots()
+                ax = plot.layout(problem.scenario, ax_exist=ax)
+                ax.imshow(wf_noise, extent=(X_noise.min(), X_noise.max(), Y_noise.min(), Y_noise.max()), origin='lower')
+                ax.plot(x_max, y_max, 'x', color='red', markeredgewidth=2, markersize=8)
+                fig.suptitle(f"Max noise: {max_noise:.2f} dB")
+                plt.show()
+                #
+                #: Compute the new control setpoints, by halving the power
+                control_setpoints = ControlSetpoints(yaw_angles=np.zeros(problem.scenario.n_wt), power_setpoints=0.5 * control_setpoints.power_setpoints)
+        case _:
+            raise ValueError(f"Unrecognized metric '{problem.metrics}'")
 
 
 def optimal_wake_steering(problem: OptProblem, N_iter: int = 100, N_swarm: int = 100, w_vel_old: float = 0.5, w_vel_best_local: float = 0.1, w_vel_best_global: float = 0.1, verbose: int = 0) -> ControlSetpoints:
@@ -306,6 +401,12 @@ def optimal_wake_steering(problem: OptProblem, N_iter: int = 100, N_swarm: int =
     #: Select the method
     match problem.opt_method:
         case 'pso':
+            #: Check if additional parameters are provided
+            if problem.params is not None:
+                if 'N_swarm' in problem.params:
+                    N_swarm = problem.params['N_swarm']
+                if 'N_iter' in problem.params:
+                    N_iter = problem.params['N_iter']
             #: Create a surrogate wind farm and metrics model
             wf_model, metrics = WindFarmModel(problem.scenario, wake_surrogate='FLORIS'), Metrics()
             #: Initialize the swarm

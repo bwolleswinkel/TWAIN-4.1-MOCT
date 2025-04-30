@@ -132,7 +132,7 @@ def flow_field(scenario: Scenario, control_setpoints: ControlSetpoints, ax_exist
         return fig, ax
     
 
-def wind_rose(wind_rose: WindRose, ax_exist: Axes = None) -> tuple[Figure, Axes]:
+def wind_rose(wind_rose: WindRose, threshold: float = None, ax_exist: Axes = None) -> tuple[Figure, Axes]:
     #: Add to existing axes (if they exist)
     if ax_exist is not None:
         #: Set equal
@@ -146,14 +146,19 @@ def wind_rose(wind_rose: WindRose, ax_exist: Axes = None) -> tuple[Figure, Axes]
     ax.set_theta_direction('clockwise')
     ax.set_theta_zero_location('N')
     #: Unravel the data
-    X, Y = np.meshgrid(wind_rose.wind_rose['direction'], wind_rose.wind_speeds, indexing='xy')
-    Z = np.zeros(X.shape)
-    for idx, _ in np.ndenumerate(Z):
-        Z[idx] = wind_rose.wind_rose.iloc[idx[1]]['frequencies'][idx[0]]
+    T, R = np.meshgrid(np.linspace(0, 2 * np.pi, wind_rose.n_bins_wd), np.linspace(0, 25, wind_rose.n_bins_ws))
+    #: Filter the data with a threshold
+    if threshold is not None:
+        wind_rose.data[wind_rose.data < threshold] = np.nan
     #: Create a contour plot
-    ax.tricontourf(X.flatten(order='F'), Y.flatten(order='F'), Z.flatten(order='F'), origin='lower')
+    cs = ax.pcolormesh(T, R, wind_rose.data, edgecolors='face', cmap='inferno')
+    #: Add a colorbar
+    cbar = fig.colorbar(cs, ax=ax)
+    cbar.set_label('Prevalence (%)')
     #: Set the labels
     ax.set_xticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
+    #: Change the color of the y-labels
+    ax.tick_params(axis='y', colors='green')
     #: Return the axis
     if ax_exist is not None:
         return ax
