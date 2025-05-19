@@ -8,6 +8,7 @@ from typing import TypeVar, TypeAlias
 
 import numpy as np
 import scipy as sp
+import numpy.typing as npt
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
@@ -15,7 +16,12 @@ from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from matplotlib.path import Path as mpltPath
 import matplotlib.tri as tri
 
-from twain.moct import Scenario, ControlSetpoints, WindFarmModel, WindRose
+from twain.moct import Scenario, ControlSetpoints, WindFarmModel, WindRose, SpatialArray
+
+# ------ TYPE ALIASES ------
+
+T = TypeVar('T', int, float, complex, bool)
+NPArray: TypeAlias = npt.NDArray[np.dtype[T]]
 
 # ------ STATIC ------
 
@@ -62,7 +68,7 @@ def layout(scenario: Scenario, control_setpoints: ControlSetpoints = None, ax_ex
         return fig, ax
 
 
-def noise_field(scenario: Scenario, control_setpoints: ControlSetpoints, ax_exist: Axes = None, clip: bool = True) -> tuple[Figure, Axes]:
+def noise_field(scenario: Scenario, control_setpoints: ControlSetpoints, xy_range: tuple[tuple[float, float], tuple[float, float]] = None, N_points: int = 1000, noise_mask: tuple[NPArray[float], NPArray[float], NPArray[float]] = None, ax_exist: Axes = None, clip: bool = True) -> tuple[Figure, Axes]:
     #: Add to existing axes (if they exist)
     if ax_exist is not None:
         #: Set equal
@@ -72,7 +78,7 @@ def noise_field(scenario: Scenario, control_setpoints: ControlSetpoints, ax_exis
         fig, ax = plt.subplots()
     #: Compute the noise from the wind farm
     wf_model = WindFarmModel(scenario)
-    _, _, (X, Y, noise_field) = wf_model.impact_control_variables(control_setpoints)
+    _, _, (X, Y, noise_field) = wf_model.impact_control_variables(control_setpoints, xy_range, N_points)
     #: Convert the wind-farm layout to a numpy array
     array_layout = scenario.wf_layout.to_numpy()
     #: Clip the noise outside the perimeter
@@ -80,8 +86,31 @@ def noise_field(scenario: Scenario, control_setpoints: ControlSetpoints, ax_exis
         for idx, _ in np.ndenumerate(noise_field):
             if not mpltPath(scenario.perimeter, closed=False).contains_point([X[idx], Y[idx]]):
                 noise_field[idx] = np.nan
+    #: Check if a noise mask is provided
+    if noise_mask is not None:
+        #: Unpack the noise mask
+        X_mask, Y_mask, noise_mask = noise_mask
+        #: Convert to SpatialArray
+        noise_mask = SpatialArray((X_mask, Y_mask), noise_mask)
+        #: Loop over all values in the noise field
+        for idx, _ in np.ndenumerate(noise_field):
+            #: Retrieve the x- and y-values
+            x, y = X[idx], Y[idx]
+            #: Check if the point is within the mask
+            noise_field[idx] = noise_field[idx] if noise_mask[x, y] else np.nan
+        # FIXME: Something is wrong, we have to 'flip' the matrix
+        noise_field = np.rot90(noise_field, k=1)
+        #: Compute the maximum noise
+        idx_max_noise = np.nanargmax(noise_field)
+        x_max_noise, y_max_noise, max_noise = X[np.unravel_index(idx_max_noise, noise_field.shape)], Y[np.unravel_index(idx_max_noise, noise_field.shape)], noise_field[np.unravel_index(idx_max_noise, noise_field.shape)]
+    else: 
+        max_noise = None
     #: Plot the noise field
     cs = ax.imshow(noise_field, extent=(X.min(), X.max(), Y.min(), Y.max()), origin='lower', aspect='auto')
+    #: Plot the maximum noise value
+    if max_noise is not None:
+        ax.plot(x_max_noise, y_max_noise, 'x', markersize=2, color='red', markeredgewidth=12, zorder=3)
+        ax.annotate(f'{max_noise:.2f} dB', xy=(x_max_noise, y_max_noise), xytext=(x_max_noise + 50, y_max_noise + 50), fontsize=8)
     #: Add a colorbar
     cbar = fig.colorbar(cs, ax=ax)
     cbar.set_label('Noise level (in dB)')
@@ -96,7 +125,7 @@ def noise_field(scenario: Scenario, control_setpoints: ControlSetpoints, ax_exis
         return fig, ax
     
 
-def flow_field(scenario: Scenario, control_setpoints: ControlSetpoints, ax_exist: Axes = None, clip: bool = True) -> tuple[Figure, Axes]:
+def flow_field(scenario: Scenario, control_setpoints: ControlSetpoints, xy_range: tuple[tuple[float, float], tuple[float, float]], N_points: int = 1000, ax_exist: Axes = None, clip: bool = True) -> tuple[Figure, Axes]:
     # TODO: Merge this with the previous method, to a unifying method 'plot_field'
     #: Add to existing axes (if they exist)
     if ax_exist is not None:
@@ -107,7 +136,7 @@ def flow_field(scenario: Scenario, control_setpoints: ControlSetpoints, ax_exist
         fig, ax = plt.subplots()
     #: Compute the noise from the wind farm
     wf_model = WindFarmModel(scenario)
-    X, Y, flow_field = wf_model.get_flow_field(control_setpoints)
+    X, Y, flow_field = wf_model.get_flow_field(control_setpoints, xy_range, N_points)
     #: Convert the wind-farm layout to a numpy array
     array_layout = scenario.wf_layout.to_numpy()
     #: Clip the noise outside the perimeter
@@ -132,7 +161,7 @@ def flow_field(scenario: Scenario, control_setpoints: ControlSetpoints, ax_exist
         return fig, ax
     
 
-def wind_rose(wind_rose: WindRose, threshold: float = None, ax_exist: Axes = None) -> tuple[Figure, Axes]:
+def wind_rose(wind_rose: WindRose, threshold: float = None, v_cutin_cutout: tuple[float, float] = None, ax_exist: Axes = None) -> tuple[Figure, Axes]:
     #: Add to existing axes (if they exist)
     if ax_exist is not None:
         #: Set equal
@@ -150,6 +179,10 @@ def wind_rose(wind_rose: WindRose, threshold: float = None, ax_exist: Axes = Non
     #: Filter the data with a threshold
     if threshold is not None:
         wind_rose.data[wind_rose.data < threshold] = np.nan
+    #: Clip the data with a cut-in and cut-out speed
+    if v_cutin_cutout is not None:
+        wind_rose.data[R[:, 0] < v_cutin_cutout[0], :] = np.nan
+        wind_rose.data[R[:, 0] > v_cutin_cutout[1], :] = np.nan
     #: Create a contour plot
     cs = ax.pcolormesh(T, R, wind_rose.data, edgecolors='face', cmap='inferno')
     #: Add a colorbar

@@ -14,7 +14,7 @@ from twain import moct, plot
 # ------------ PARAMETERS ------------
 
 # Select the wind-farm layout
-layout = 'data/example_site_2/wf_layout.csv'
+layout = 'data/example_site_1/wf_layout.csv'
 
 # Select the scenario parameters
 U_inf = 12.0  # Mean wind speed, in m/s

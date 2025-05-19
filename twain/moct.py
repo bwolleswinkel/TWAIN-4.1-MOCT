@@ -76,6 +76,20 @@ class WindRose(FlorisWindRose):
             case _:
                 raise ValueError(f"Unrecognized wind rose format '{type(wind_rose)}'")
 
+    @classmethod
+    def from_ts(cls, wind_direction: NPArray[float], wind_speed: NPArray[float], n_bins_wd: int = None, n_bins_ws: int = None) -> WindRose:
+        #: Compute a histogram
+        hist, _, _ = np.histogram2d(wind_speed, wind_direction, bins=[n_bins_ws, n_bins_wd], range=[[0, 25], [0, 360]])
+        #: Normalize the histogram
+        hist = hist / np.sum(hist)
+        #: Create a DataFrame
+        T, R = np.meshgrid(np.linspace(0, 360, n_bins_wd), np.linspace(0, 25, n_bins_ws), indexing='xy')
+        df_wind_rose = pd.DataFrame(np.column_stack((T.flatten(order='F'), R.flatten(order='F'), hist.flatten(order='F'))), columns=['wind_dir', 'wind_speed', 'prevalence'])
+        #: Create a wind rose object
+        wind_rose = cls(df_wind_rose)
+        #: Return the wind rose object
+        return wind_rose
+    
     def __str__(self) -> str:
         return f"<class: {self.__class__.__name__}> | Wind rose object with {self.n_bins_wd} direction bins and {self.n_bins_ws} wind speed bins\n" + f"{self.wind_rose.__str__()}"
 
@@ -162,7 +176,7 @@ class WindFarmModel:
         self.wake_surrogate = wake_surrogate if wake_surrogate is not None else self.DEFAULT_WAKE_SURROGATE
 
     # TODO: This should really be separate functions, if we're interested in separate 'impacts'
-    def impact_control_variables(self, control_setpoints: ControlSetpoints, N_grid: int = 100) -> NPArray[float]:
+    def impact_control_variables(self, control_setpoints: ControlSetpoints, xy_range: tuple[tuple[float, float], tuple[float, float]] = None, N_grid: int = 1000) -> NPArray[float]:
         """
         Function to compute the impact of the control variables on the wind farm.
         """
@@ -202,7 +216,10 @@ class WindFarmModel:
         #: Extract the perimeter of the wind farm
         perimeter = self.scenario.perimeter
         #: Create a meshgrid
-        (X, Y), Z = np.meshgrid(np.linspace(perimeter[:, 0].min(), perimeter[:, 0].max(), N_grid), np.linspace(perimeter[:, 1].min(), perimeter[:, 1].max(), N_grid), indexing='xy'), np.zeros((N_grid, N_grid))
+        if xy_range is None:
+            (X, Y), Z = np.meshgrid(np.linspace(perimeter[:, 0].min(), perimeter[:, 0].max(), N_grid), np.linspace(perimeter[:, 1].min(), perimeter[:, 1].max(), N_grid), indexing='xy'), np.zeros((N_grid, N_grid))
+        else:
+            (X, Y), Z = np.meshgrid(np.linspace(*xy_range[0], N_grid), np.linspace(*xy_range[1], N_grid), indexing='xy'), np.zeros((N_grid, N_grid))
         #: Convert the wind-farm layout to a numpy array
         wf_array_layout = self.scenario.wf_layout.to_numpy()
         #: Compute the noise field
@@ -215,7 +232,7 @@ class WindFarmModel:
         #: Return the results
         return wt_power, wt_load, (X, Y, wf_noise)
     
-    def get_flow_field(self, control_setpoints: ControlSetpoints) -> NPArray[float]:
+    def get_flow_field(self, control_setpoints: ControlSetpoints, xy_range: tuple[tuple[float, float], tuple[float, float]], N_points: int = 1000) -> NPArray[float]:
         #: Calculate the power
         match self.wake_surrogate:
             case 'FLORIS':
@@ -226,16 +243,19 @@ class WindFarmModel:
                 fmodel.set(turbulence_intensities=[self.scenario.TI], wind_directions=[self.scenario.theta], wind_speeds=[self.scenario.U_inf])
                 #: Set the control variables
                 fmodel.set(yaw_angles=[control_setpoints.yaw_angles])
-                if control_setpoints.power_setpoints is True:
+                if control_setpoints.power_setpoints is not None:
+                    # TEMP
+                    #
+                    print(f"Power setpoints: {control_setpoints.power_setpoints}")
+                    #
                     fmodel.set_operation_model("simple-derating")
-                    fmodel.set(power_setpoints=[control_setpoints.power_setpoints])
+                    fmodel.set(power_setpoints=[control_setpoints.power_setpoints * 1E7])
                 #: Run the model
                 fmodel.run()
                 #: Extract the flow field
-                N_POINTS = 1000
-                (X, Y), Z = np.meshgrid(np.linspace(0, 500, N_POINTS), np.linspace(0, 500, N_POINTS), indexing='xy'), np.full(N_POINTS ** 2, 90.0)
+                (X, Y), Z = np.meshgrid(np.linspace(*xy_range[0], N_points), np.linspace(*xy_range[1], N_points), indexing='xy'), np.full(N_points ** 2, 90.0)
                 flow_field = fmodel.sample_flow_at_points(X.flatten(order='F'), Y.flatten(order='F'), Z)
-                flow_field = flow_field.reshape(N_POINTS, N_POINTS, order='F')
+                flow_field = flow_field.reshape(N_points, N_points, order='F')
             case 'PyWake':
                 raise NotImplementedError("PyWake wake surrogate not yet implemented")
             case _:
@@ -373,19 +393,6 @@ def optimal_downregulation(problem: OptProblem, N_iter: int = 100) -> ControlSet
                 wf_noise = np.rot90(wf_noise, k=1)
                 #: Compute the maximum noise
                 max_noise = np.nanmax(wf_noise)
-                # TEMP
-                #
-                import matplotlib.pyplot as plt
-                from twain import plot
-                indices = np.nanargmax(wf_noise)
-                x_max, y_max = X_noise[np.unravel_index(indices, wf_noise.shape)], Y_noise[np.unravel_index(indices, wf_noise.shape)]
-                fig, ax = plt.subplots()
-                ax = plot.layout(problem.scenario, ax_exist=ax)
-                ax.imshow(wf_noise, extent=(X_noise.min(), X_noise.max(), Y_noise.min(), Y_noise.max()), origin='lower')
-                ax.plot(x_max, y_max, 'x', color='red', markeredgewidth=2, markersize=8)
-                fig.suptitle(f"Max noise: {max_noise:.2f} dB")
-                plt.show()
-                #
                 #: Compute the new control setpoints, by halving the power
                 control_setpoints = ControlSetpoints(yaw_angles=np.zeros(problem.scenario.n_wt), power_setpoints=0.5 * control_setpoints.power_setpoints)
         case _:
@@ -421,7 +428,7 @@ def optimal_wake_steering(problem: OptProblem, N_iter: int = 100, N_swarm: int =
                     #: Compute the power production
                     wt_power, _, _ = wf_model.impact_control_variables(ControlSetpoints(yaw_angles=yaw_now[:, particle, iter], power_setpoints=np.ones(problem.scenario.n_wt)))
                     #: Map the power production to metrics
-                    # TEMP
+                    # FIXME: This is a in=place measure, results are garbage
                     cost_now[particle, iter] = metrics.compute_aep(wt_power) * 1E-14
                     #: Check if this is the particles best score since now
                     if cost_now[particle, iter] > cost_now[particle, idx_iter_best[particle, max([0, iter - 1])]]:
@@ -445,7 +452,7 @@ def optimal_wake_steering(problem: OptProblem, N_iter: int = 100, N_swarm: int =
             control_setpoints = ControlSetpoints(yaw_angles=global_best, power_setpoints=np.ones(problem.scenario.n_wt))
         case _:
             raise ValueError(f"Unrecognized optimization method '{problem.opt_method}'")
-    # TEMP
+    # TEMP: plot iterations of PSO
     #
     cost_best = np.array([[cost_now[particle, idx_iter_best[particle, iter]] for particle in range(N_swarm)] for iter in range(N_iter)]).T
     import matplotlib.pyplot as plt
@@ -505,10 +512,14 @@ def optimal_power_lines(problem: OptProblem, groups: list) -> list:
     return vertices_power_lines
 
 
+def ti_from_ws(TI: float) -> float:
+    pass
+
+
 # ------ PLACEHOLDERS ------
 
 
-def placeholder_oscilation_decay_2d(X: NPArray[float], Y: NPArray[float], wt_loc: NPArray[float], U_inf: float, theta: float) -> NPArray[float]:
+def placeholder_oscilation_decay_2d(X: NPArray[float], Y: NPArray[float], wt_loc: NPArray[float], U_inf: float, theta: float, f_decay: float = 500) -> NPArray[float]:
     """
     Function to compute the 2D draft oscillation decay.
     """
@@ -518,11 +529,11 @@ def placeholder_oscilation_decay_2d(X: NPArray[float], Y: NPArray[float], wt_loc
     #: Compute the angle
     alpha = np.arctan2(Y - wt_loc[1], X - wt_loc[0])
     #: Compute the decay
-    decay = np.exp(-R / 100)
+    decay = np.exp(-R / f_decay)
     #: Compute the oscillation
-    oscillation = np.sin(2 * np.pi * R / 100)
+    oscillation = np.sin(2 * np.pi * R / f_decay)
     #: Compute the draft
-    draft = U_inf * decay * oscillation
+    draft = 0.80 * U_inf * decay * oscillation
     #: Return the result
     return draft
 

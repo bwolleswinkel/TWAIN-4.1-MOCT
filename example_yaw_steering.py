@@ -63,8 +63,7 @@ ax_noise.set_ylim([0, 500])
 fig_noise.suptitle("Noise field")
 
 # Plot the flow field
-# FIXME: The yaw offset seems to have no effect on the wake?
-fig_flow, ax_flow = plot.flow_field(scenario, optimal_control_setpoints, clip=False)
+fig_flow, ax_flow = plot.flow_field(scenario, optimal_control_setpoints, xy_range=[[0, 500], [0, 500]], clip=False)
 ax_flow.set_xlim([0, 500])
 ax_flow.set_ylim([0, 500])
 fig_flow.suptitle("Flow field")

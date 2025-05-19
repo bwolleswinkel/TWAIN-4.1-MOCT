@@ -5,6 +5,7 @@ Example script to plot a wind rose
 # Import packages
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from yaml import safe_load
 import matplotlib.pyplot as plt
@@ -15,6 +16,9 @@ from twain import moct, plot
 
 # Select the directory with the wind-rose data
 wind_rose = 'data/example_site_1/wind_rose.csv'
+
+# Set whether to clip the wind-rose data
+v_cutin_cutout = None  # Set to None to disable clipping
 
 # ------------ SCRIPT ------------
 
@@ -44,8 +48,8 @@ print(wind_rose)
 
 # ------------ PLOTTING ------------
 
-# Plot the wind-farm layout
-fig_wind_rose, ax_wind_rose = plot.wind_rose(wind_rose, threshold=None)
+# Plot the wind rose
+fig_wind_rose, ax_wind_rose = plot.wind_rose(wind_rose, threshold=0.01, v_cutin_cutout=v_cutin_cutout)
 fig_wind_rose.suptitle("Wind rose")
 
 # Show the plots
