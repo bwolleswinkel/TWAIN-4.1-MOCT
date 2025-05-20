@@ -46,7 +46,7 @@ class Scenario:
         self.power_lines = power_lines
 
     def __str__(self) -> str:
-        return f"<class: {self.__class__.__name__}> | Scenario object with {self.n_wt if self.n_wt is not None and self.n_wt > 0 else 'unspecified number of'} wind turbines\n" + f"+------------+\n" + f"{''.join(['|            |\n' for _ in range(4)])}" + f"+------------+"
+        return f"<class: {self.__class__.__name__}> | Scenario object with {self.n_wt if self.n_wt is not None and self.n_wt > 0 else 'unspecified number of'} wind turbines\n" + f"+------------+\n" + f"{''.join(['|            |' for _ in range(4)])}" + f"+------------+"
 
 
 class WindRose(FlorisWindRose):
