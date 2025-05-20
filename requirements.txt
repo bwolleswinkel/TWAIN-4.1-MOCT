@@ -1,10 +1,9 @@
 pipython
----
 numpy
 scipy
-yaml (maybe not needed?)
 pyyaml
 pandas
 matplotlib
 floris
-tqdm #(not strictly nesessary)
+tqdm  # (not strictly nesessary)
+pyqt6  # although, probably removed later

@@ -1,4 +1,4 @@
-""" Example script for yaw steering co-design.
+"""Script to demonstrate optimization with geometric yaw control.
 
 """
 
@@ -11,6 +11,7 @@ from yaml import safe_load
 import matplotlib.pyplot as plt
 
 from twain import moct, plot
+from twain.moct import WindFarmModel
 
 # ------------ PARAMETERS ------------
 
@@ -25,8 +26,8 @@ datum = [621400, 6181000]
 
 # Select the scenario parameters
 U_inf = 12.0  # Mean wind speed, in m/s
-theta = 270  # Wind direction, in degrees
-turb_intensity = 0.16  # Turbulence intensity
+theta = 330  # Wind direction, in degrees
+turb_intensity = 0.06  # Turbulence intensity
 
 # ------------ SCRIPT ------------
 
@@ -44,19 +45,42 @@ match path_layout.suffix:
     case _:
         raise ValueError(f"Unrecognized file format '{path_layout.suffix}")
     
-# Extract the noise mask
-noise_mask = np.load(buildings)
-# FIXME: Add X and Y to dataset itself
-X_mask, Y_mask = np.meshgrid(np.linspace(0, 2500, 2500), np.linspace(0, 2500, 2500), indexing='xy')
-    
 # Convert to numpy array
 array_layout = df_layout[['x', 'y']].to_numpy() - datum
 
 # Create the scenario
 scenario = moct.Scenario(wf_layout=array_layout, U_inf=U_inf, theta=theta, TI=turb_intensity, wt_names=df_layout['name'])
 
+# TEMP
+print(scenario)
+
+# Create a wind farm model
+wf_model = WindFarmModel(scenario)
+
 # Set the greedy control setpoints
-greedy_control_setpoints = moct.ControlSetpoints(np.zeros(scenario.n_wt), np.array([1., 0.9, 0.2, 0.3]))
+greedy_control_setpoints = moct.ControlSetpoints(np.zeros(scenario.n_wt), np.ones(scenario.n_wt))
+
+# Construct an optimization problem
+problem = moct.OptProblem(scenario, metrics=['aep'], opt_type='wake_steering', opt_method='geometric')
+
+# Solve the problem
+geometric_control_setpoints = problem.solve()
+
+# Calculate the wind farm power
+greedy_power, *_ = wf_model.impact_control_variables(greedy_control_setpoints)
+geometric_power, *_ = wf_model.impact_control_variables(geometric_control_setpoints)
+
+# ------------ PRINTING ------------
+
+# Print the WF power
+print(f"--- Greedy ({np.sum(greedy_power) / 1E6:.2f} MW): ---")
+for idx in range(scenario.n_wt):
+    print(f"WT {scenario.wt_names[idx]}:  {greedy_power.flatten()[idx] / 1E6:.2f} MW")
+
+# Print the optimal yaw angle
+print(f"\n--- Geometric yaw ({np.sum(geometric_power) / 1E6:.2f} MW): ---")
+for idx in range(scenario.n_wt):
+    print(f"WT {scenario.wt_names[idx]}:  {geometric_power.flatten()[idx] / 1E6:.2f} MW")
 
 # ------------ PLOTTING ------------
 
@@ -71,13 +95,6 @@ ax_layout.set_ylim(xy_range[1])
 ax_layout.set_aspect('equal')
 fig_layout.suptitle("Wind-farm layout")
 
-# Plot the noise field
-fig_noise, ax_noise = plot.noise_field(scenario, greedy_control_setpoints, xy_range=xy_range, noise_mask=[X_mask, Y_mask, noise_mask], N_points=20, clip=False)
-ax_noise.set_xlim(xy_range[0])
-ax_noise.set_ylim(xy_range[1])
-ax_noise.set_aspect('equal')
-fig_noise.suptitle("Noise field")
-
 # Plot the flow field
 fig_flow, ax_flow = plot.flow_field(scenario, greedy_control_setpoints, xy_range=xy_range, clip=False)
 ax_flow.set_xlim(xy_range[0])
@@ -87,6 +104,5 @@ fig_flow.suptitle("Flow field")
 
 # Show the plots
 # plt.close(fig_layout)
-# plt.close(fig_noise)
 # plt.close(fig_flow)
 plt.show()

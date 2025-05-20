@@ -12,6 +12,7 @@ import numpy.typing as npt
 from tqdm import tqdm
 from floris import FlorisModel, WindRose as FlorisWindRose
 from floris.optimization.layout_optimization.layout_optimization_scipy import LayoutOptimizationScipy
+from floris.optimization.yaw_optimization.yaw_optimizer_geometric import YawOptimizationGeometric
 
 # ------ TYPE ALIASES ------
 
@@ -450,14 +451,28 @@ def optimal_wake_steering(problem: OptProblem, N_iter: int = 100, N_swarm: int =
                         yaw_now[:, particle, iter + 1] = np.clip(yaw_now[:, particle, iter] + velocity_now[:, particle], YAW_LOWER_LIMIT, YAW_UPPER_LIMIT)
             #: Create the operating setpoints
             control_setpoints = ControlSetpoints(yaw_angles=global_best, power_setpoints=np.ones(problem.scenario.n_wt))
+        case 'geometric':
+            #: Create a surrogate wind farm and metrics model
+            # TODO: Move this to the class WindFarmModel
+            fmodel = FlorisModel('./config/floris/config_floris_farm.yaml')
+            fmodel.set(layout_x=problem.scenario.wf_layout['x'], layout_y=problem.scenario.wf_layout['y'])
+            fmodel.set(turbulence_intensities=[problem.scenario.TI], wind_directions=[problem.scenario.theta], wind_speeds=[problem.scenario.U_inf])
+            #: Compute the optimal yaw angles
+            # FROM: https://nrel.github.io/floris/examples/examples_control_optimization/006_compare_yaw_optimizers.html  # nopep8
+            yaw_opt_geo = YawOptimizationGeometric(fmodel)
+            df_opt_geo = yaw_opt_geo.optimize()
+            yaw_angles_opt_geo = np.vstack(df_opt_geo.yaw_angles_opt).flatten()
+            #: Create the operating setpoints
+            control_setpoints = ControlSetpoints(yaw_angles=yaw_angles_opt_geo, power_setpoints=np.ones(problem.scenario.n_wt))
         case _:
             raise ValueError(f"Unrecognized optimization method '{problem.opt_method}'")
     # TEMP: plot iterations of PSO
     #
-    cost_best = np.array([[cost_now[particle, idx_iter_best[particle, iter]] for particle in range(N_swarm)] for iter in range(N_iter)]).T
-    import matplotlib.pyplot as plt
-    plt.plot(np.max(cost_best, axis=0))
-    plt.show()
+    if problem.opt_method == 'pso':
+        cost_best = np.array([[cost_now[particle, idx_iter_best[particle, iter]] for particle in range(N_swarm)] for iter in range(N_iter)]).T
+        import matplotlib.pyplot as plt
+        plt.plot(np.max(cost_best, axis=0))
+        plt.show()
     #
     #: Return the results
     return control_setpoints
