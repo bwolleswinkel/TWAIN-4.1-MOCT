@@ -14,6 +14,9 @@ from floris import FlorisModel, WindRose as FlorisWindRose
 from floris.optimization.layout_optimization.layout_optimization_scipy import LayoutOptimizationScipy
 from floris.optimization.yaw_optimization.yaw_optimizer_geometric import YawOptimizationGeometric
 
+# TODO: Remove this dependency
+import twain.utils as utils
+
 # ------ TYPE ALIASES ------
 
 T = TypeVar('T', int, float, complex, bool)
@@ -97,6 +100,33 @@ class WindRose(FlorisWindRose):
     
     def __str__(self) -> str:
         return f"<class: {self.__class__.__name__}> | Wind rose object with {self.n_bins_wd} direction bins and {self.n_bins_ws} wind speed bins\n" + f"{self.wind_rose.__str__()}"
+    
+    def resample(self, N_bins_wd: int = None, N_bins_ws: int = None, mode: str = 'resample'):
+        """ Function to resample the wind rose data.
+        
+        """
+        #: Check if resampling is needed
+        if N_bins_wd is None and N_bins_ws is None:
+            return
+        #: Check the mode
+        match mode:
+            case 'resample':
+                #: Check that resampling factors are integers
+                resampling_factor_wd, resampling_factor_ws = np.floor_divide(self.n_bins_wd, N_bins_wd), np.floor_divide(self.n_bins_ws, N_bins_ws)
+                #: Resample the data
+                # FIXME: This is by no means robust or efficient, and very sensitive
+                data = np.zeros((N_bins_ws, N_bins_wd))
+                for idx in np.ndindex(data.shape):
+                    data[idx] = np.sum(self.data[idx[0] * resampling_factor_ws:(idx[0] + 1) * resampling_factor_ws, idx[1] * resampling_factor_wd:(idx[1] + 1) * resampling_factor_wd])
+                wd, ws = np.meshgrid(np.linspace(0, 360, N_bins_wd), np.linspace(0, 25, N_bins_ws), indexing='xy')
+                self.wind_rose = pd.DataFrame(np.column_stack((wd.flatten(order='F'), ws.flatten(order='F'), data.flatten(order='F'))), columns=['wind_dir', 'wind_speed', 'prevalence'])
+                self.data = data
+                self.n_bins_wd = N_bins_wd
+                self.n_bins_ws = N_bins_ws
+            case 'interpolate':
+                raise NotImplementedError("Interpolation not yet implemented")
+            case _:
+                raise ValueError(f"Unrecognized resampling mode '{mode}'")
 
 
 class OptProblem:
@@ -191,13 +221,21 @@ class WindFarmModel:
                 #: Construct the wind farm model from a template
                 fmodel = FlorisModel('./config/floris/config_floris_farm.yaml')
                 fmodel.set(layout_x=self.scenario.wf_layout['x'], layout_y=self.scenario.wf_layout['y'])
-                fmodel.set(turbulence_intensities=[self.scenario.TI], wind_directions=[self.scenario.theta], wind_speeds=[self.scenario.U_inf])
+                # FIXME: This must be made robust, whether we give a single scenario or whether we give multiple scenarios
+                if not isinstance(self.scenario.U_inf, float):
+                    fmodel.set(turbulence_intensities=[TI for TI in self.scenario.TI], wind_directions=[theta for theta in self.scenario.theta], wind_speeds=[U_inf for U_inf in self.scenario.U_inf])
+                else:
+                    fmodel.set(turbulence_intensities=[self.scenario.TI], wind_directions=[self.scenario.theta], wind_speeds=[self.scenario.U_inf])
                 # FIXME: This gives a persistent warning 'floris.floris_model.FlorisModel WARNING turbine_type has been changed without specifying a new reference_wind_height. reference_wind_height remains 90.00 m. Consider calling `FlorisModel.assign_hub_height_to_ref_height` to update the reference wind height to the turbine hub height.'
                 # fmodel.set_wt_yaw(turbine_type=self.scenario.wt_model)
                 if self.scenario.wind_rose is not None:
                     fmodel.set(wind_data=self.scenario.wind_rose)
                 #: Set the control variables
-                fmodel.set(yaw_angles=[control_setpoints.yaw_angles])
+                # FIXME: Make this robust for multiple ambient conditions
+                if not isinstance(self.scenario.U_inf, float):
+                    fmodel.set(yaw_angles=control_setpoints.yaw_angles.T)
+                else:
+                    fmodel.set(yaw_angles=[control_setpoints.yaw_angles] if control_setpoints.yaw_angles.size == self.scenario.n_wt else [yaw_angles for yaw_angles in control_setpoints.yaw_angles])
                 if control_setpoints.power_setpoints is True:
                     fmodel.set_operation_model("simple-derating")
                     fmodel.set(power_setpoints=[control_setpoints.power_setpoints])
@@ -228,12 +266,16 @@ class WindFarmModel:
         #: Convert the wind-farm layout to a numpy array
         wf_array_layout = self.scenario.wf_layout.to_numpy()
         #: Compute the noise field
-        for wt in wf_array_layout:
-            #: Compute the distribution
-            Z += placeholder_oscilation_decay_2d(X, Y, wt, self.scenario.U_inf, self.scenario.theta)
-        wf_noise = Z
-        #: Cap the noise
-        wf_noise = 4 * np.clip(wf_noise + 12, 0, Z.max())
+        # FIXME: This must be made robust such that this can handle multiple ambient conditions by default
+        if not isinstance(self.scenario.U_inf, float):
+            wf_noise = None
+        else:
+            for wt in wf_array_layout:
+                #: Compute the distribution
+                Z += placeholder_oscilation_decay_2d(X, Y, wt, self.scenario.U_inf, self.scenario.theta)
+            wf_noise = Z
+            #: Cap the noise
+            wf_noise = 4 * np.clip(wf_noise + 12, 0, Z.max())
         #: Return the results
         return wt_power, wt_load, (X, Y, wf_noise)
     
@@ -283,28 +325,33 @@ class LoadSurrogateModel:
 
 
 class Metrics:
-    """
-    Class which stores the metrics.
+    """Class which stores the metrics.
+
     """
     def __init__(self) -> None:
         pass
 
-    def compute_aep(self, wt_power: NPArray[float]) -> float:
-        """
-        Function to compute the annual energy production.
+    def compute_aep(self, wt_power: NPArray[float], params: dict = None) -> float:
+        """Function to compute the annual energy production.
+
         """
         #: Compute the annual power production
-        aep = np.sum(wt_power) * 31_536_000
+        if params is not None:
+            prevalence = params['prevalence']
+            # NOTE: This assumes the array wt_power is of size (N_bins_wd, N_bins_ws, n_wt)
+            aep = np.nansum(np.nansum(wt_power, axis=2) * (prevalence / 100)) * 31_536_000
+        else:
+            aep = np.sum(wt_power) * 31_536_000
         #: Return the result
         return aep
     
     def compute_lcoe(self, scenario: Scenario, wt_power: NPArray[float]) -> float:
-        """
-        Function to compute the levelized cost of energy. This also takes into account loads.
+        """Function to compute the levelized cost of energy. This also takes into account loads.
+
         """
         #: Compute the annual energy production
         aep = self.compute_aep(wt_power)
-        #: Compute the levelized cost of energy
+        #: Compute the levelized cost of electricity
         lcoe = 1.0 * aep
         #: Return the result
         return lcoe
@@ -456,12 +503,14 @@ def optimal_wake_steering(problem: OptProblem, N_iter: int = 100, N_swarm: int =
             # TODO: Move this to the class WindFarmModel
             fmodel = FlorisModel('./config/floris/config_floris_farm.yaml')
             fmodel.set(layout_x=problem.scenario.wf_layout['x'], layout_y=problem.scenario.wf_layout['y'])
-            fmodel.set(turbulence_intensities=[problem.scenario.TI], wind_directions=[problem.scenario.theta], wind_speeds=[problem.scenario.U_inf])
+            # TODO: Move the methodology 'ensure_list' to the class WindFarmModel itself
+            fmodel.set(turbulence_intensities=utils.ensure_list(problem.scenario.TI), wind_directions=utils.ensure_list(problem.scenario.theta), wind_speeds=utils.ensure_list(problem.scenario.U_inf))
             #: Compute the optimal yaw angles
             # FROM: https://nrel.github.io/floris/examples/examples_control_optimization/006_compare_yaw_optimizers.html  # nopep8
             yaw_opt_geo = YawOptimizationGeometric(fmodel)
             df_opt_geo = yaw_opt_geo.optimize()
-            yaw_angles_opt_geo = np.vstack(df_opt_geo.yaw_angles_opt).flatten()
+            # FIXME: I don't know what the correct shape should be here...
+            yaw_angles_opt_geo = np.squeeze(np.vstack(df_opt_geo.yaw_angles_opt).T)
             #: Create the operating setpoints
             control_setpoints = ControlSetpoints(yaw_angles=yaw_angles_opt_geo, power_setpoints=np.ones(problem.scenario.n_wt))
         case _:
@@ -527,8 +576,18 @@ def optimal_power_lines(problem: OptProblem, groups: list) -> list:
     return vertices_power_lines
 
 
-def ti_from_ws(TI: float) -> float:
-    pass
+def ti_from_ws(ws: float | NPArray[float], place: str = 'offshore') -> float | NPArray[float]:
+    # FROM: "Current issues in wind energy meteorology," Emeis (2014)
+    #: Match the place
+    match place:
+        case 'onshore':
+            TI = np.clip(0.8 / np.clip(ws, 0.1, None) + 0.1, 0, 0.5)
+        case 'offshore':
+            TI = np.clip(0.4 / np.clip(ws, 0.1, None) - 0.07 + 0.07 * np.sqrt(0.1 * ws), 0, 0.2)
+        case _:
+            raise ValueError(f"Unrecognized place '{place}'")
+    #: Return the result
+    return TI
 
 
 # ------ PLACEHOLDERS ------

@@ -54,6 +54,9 @@ def layout(scenario: Scenario, control_setpoints: ControlSetpoints = None, ax_ex
     for wt_idx in range(array_layout.shape[0]):
         #: Extract and rotate the image
         # NOTE: 'sp.ndimage.rotate' uses clockwise rotation, so that's why the minus sign is used
+        # FIXME: How to handle an 'empty' scenario?
+        if scenario.theta is None:
+            scenario.theta = 270
         ab = AnnotationBbox(OffsetImage(sp.ndimage.rotate(plt.imread(PATH_WT_TOP_ICON), -(scenario.theta + control_setpoints.yaw_angles[wt_idx])), zoom=0.1), array_layout[wt_idx, :], frameon=False)
         ax.add_artist(ab)
         ax.annotate(scenario.wt_names[wt_idx], array_layout[wt_idx, :] + TEXT_OFFSET, fontsize=8)
