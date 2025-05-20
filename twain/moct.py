@@ -40,7 +40,11 @@ class Scenario:
         self.wt_names = wt_names if wt_names is not None else [f'{i:03}' for i in range(self.n_wt)]
         self.wind_rose = None
         if perimeter is None and wf_layout is not None:
-            convex_hull_indices = sp.spatial.ConvexHull(wf_layout).vertices
+            # TODO: This is not a rigorous implementation
+            try:
+                convex_hull_indices = sp.spatial.ConvexHull(wf_layout).vertices
+            except sp.spatial.qhull.QhullError:  # Wind turbines are (probably) along a line
+                convex_hull_indices = np.array([np.argmax(wf_layout[:, 0]), np.argmin(wf_layout[:, 0])])
             self.perimeter = np.column_stack([wf_layout[convex_hull_indices, 0], wf_layout[convex_hull_indices, 1]])
         else:
             self.perimeter = perimeter
@@ -245,10 +249,6 @@ class WindFarmModel:
                 #: Set the control variables
                 fmodel.set(yaw_angles=[control_setpoints.yaw_angles])
                 if control_setpoints.power_setpoints is not None:
-                    # TEMP
-                    #
-                    print(f"Power setpoints: {control_setpoints.power_setpoints}")
-                    #
                     fmodel.set_operation_model("simple-derating")
                     fmodel.set(power_setpoints=[control_setpoints.power_setpoints * 1E7])
                 #: Run the model
