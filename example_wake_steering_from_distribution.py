@@ -25,7 +25,7 @@ wind_rose = 'data/la_haute_borne/wind_rose.csv'
 datum = [621400, 6181000]
 
 # Set the resampling factor
-N_bins_wd, N_bins_ws = 72, 25
+N_bins_wd, N_bins_ws = None, None
 
 # ------------ SCRIPT ------------
 
@@ -65,6 +65,7 @@ wind_rose = moct.WindRose(df_wind_rose)
 
 # Resample the wind-rose data
 wind_rose.resample(N_bins_wd, N_bins_ws, mode='resample')
+N_bins_ws, N_bins_wd = wind_rose.data.shape
 
 # Create an empty scenario
 empty_scenario = moct.Scenario(wf_layout=array_layout, wt_names=df_layout['name'])
