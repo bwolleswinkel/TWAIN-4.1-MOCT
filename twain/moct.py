@@ -88,6 +88,8 @@ class WindRose(FlorisWindRose):
     def from_ts(cls, wind_direction: NPArray[float], wind_speed: NPArray[float], n_bins_wd: int = None, n_bins_ws: int = None) -> WindRose:
         #: Compute a histogram
         hist, _, _ = np.histogram2d(wind_speed, wind_direction, bins=[n_bins_ws, n_bins_wd], range=[[0, 25], [0, 360]])
+        # FIXME: For some reason, we need to flip this up/down
+        hist = np.flipud(hist)
         #: Normalize the histogram
         hist = hist / np.sum(hist)
         #: Create a DataFrame
