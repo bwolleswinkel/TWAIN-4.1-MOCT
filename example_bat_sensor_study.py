@@ -177,7 +177,7 @@ ax_wind_rose_no_bats = plot.wind_rose(wind_rose_no_bats, threshold=cut_off_thres
 ax_wind_rose_bats = plot.wind_rose(wind_rose_bats, threshold=cut_off_threshold, ax_exist=ax_wind_rose_bats)
 ax_wind_rose_no_bats.set_title("Wind rose (no bat activity)")
 ax_wind_rose_bats.set_title("Wind rose (bat activity)")
-fig_wind_rose_bat_activity.suptitle("Wind rose (seperated by bat activity)")
+fig_wind_rose_bat_activity.suptitle("Wind rose (separated by bat activity)")
 
 # Show the plots
 # plt.close(fig_layout)
