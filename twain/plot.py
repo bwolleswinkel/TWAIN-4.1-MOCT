@@ -54,6 +54,9 @@ def layout(scenario: Scenario, control_setpoints: ControlSetpoints = None, ax_ex
     for wt_idx in range(array_layout.shape[0]):
         #: Extract and rotate the image
         # NOTE: 'sp.ndimage.rotate' uses clockwise rotation, so that's why the minus sign is used
+        # FIXME: How to handle an 'empty' scenario?
+        if scenario.theta is None:
+            scenario.theta = 270
         ab = AnnotationBbox(OffsetImage(sp.ndimage.rotate(plt.imread(PATH_WT_TOP_ICON), -(scenario.theta + control_setpoints.yaw_angles[wt_idx])), zoom=0.1), array_layout[wt_idx, :], frameon=False)
         ax.add_artist(ab)
         ax.annotate(scenario.wt_names[wt_idx], array_layout[wt_idx, :] + TEXT_OFFSET, fontsize=8)
@@ -186,7 +189,7 @@ def wind_rose(wind_rose: WindRose, threshold: float = None, v_cutin_cutout: tupl
     #: Create a contour plot
     cs = ax.pcolormesh(T, R, wind_rose.data, edgecolors='face', cmap='inferno')
     #: Add a colorbar
-    cbar = fig.colorbar(cs, ax=ax)
+    cbar = plt.colorbar(cs, ax=ax)
     cbar.set_label('Prevalence (%)')
     #: Set the labels
     ax.set_xticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
