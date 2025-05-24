@@ -189,7 +189,7 @@ def wind_rose(wind_rose: WindRose, threshold: float = None, v_cutin_cutout: tupl
     #: Create a contour plot
     cs = ax.pcolormesh(T, R, wind_rose.data, edgecolors='face', cmap='inferno')
     #: Add a colorbar
-    cbar = fig.colorbar(cs, ax=ax)
+    cbar = plt.colorbar(cs, ax=ax)
     cbar.set_label('Prevalence (%)')
     #: Set the labels
     ax.set_xticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
