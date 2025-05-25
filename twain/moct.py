@@ -103,13 +103,13 @@ class WindRose(FlorisWindRose):
     def __str__(self) -> str:
         return f"<class: {self.__class__.__name__}> | Wind rose object with {self.n_bins_wd} direction bins and {self.n_bins_ws} wind speed bins\n" + f"{self.wind_rose.__str__()}"
     
-    def resample(self, N_bins_wd: int = None, N_bins_ws: int = None, mode: str = 'resample'):
+    def resample(self, N_bins_wd: int = None, N_bins_ws: int = None, mode: str = 'resample', in_place: bool = True):
         """ Function to resample the wind rose data.
         
         """
         #: Check if resampling is needed
         if N_bins_wd is None and N_bins_ws is None:
-            return
+            pass
         #: Check the mode
         match mode:
             case 'resample':
@@ -121,10 +121,19 @@ class WindRose(FlorisWindRose):
                 for idx in np.ndindex(data.shape):
                     data[idx] = np.sum(self.data[idx[0] * resampling_factor_ws:(idx[0] + 1) * resampling_factor_ws, idx[1] * resampling_factor_wd:(idx[1] + 1) * resampling_factor_wd])
                 wd, ws = np.meshgrid(np.linspace(0, 360, N_bins_wd), np.linspace(0, 25, N_bins_ws), indexing='xy')
-                self.wind_rose = pd.DataFrame(np.column_stack((wd.flatten(order='F'), ws.flatten(order='F'), data.flatten(order='F'))), columns=['wind_dir', 'wind_speed', 'prevalence'])
-                self.data = data
-                self.n_bins_wd = N_bins_wd
-                self.n_bins_ws = N_bins_ws
+                if in_place:
+                    self.wind_rose = pd.DataFrame(np.column_stack((wd.flatten(order='F'), ws.flatten(order='F')[::-1], data.flatten(order='F'))), columns=['wind_dir', 'wind_speed', 'prevalence'])
+                    self.data = data
+                    self.n_bins_wd = N_bins_wd
+                    self.n_bins_ws = N_bins_ws
+                else:
+                    # FIXME: This class is really broken, initialization is not as it should be...
+                    wind_rose = WindRose(pd.DataFrame(np.column_stack((wd.flatten(order='F'), ws.flatten(order='F'), data.flatten(order='F'))), columns=['wind_dir', 'wind_speed', 'prevalence']))
+                    self.wind_rose = pd.DataFrame(np.column_stack((wd.flatten(order='F'), ws.flatten(order='F')[::-1], data.flatten(order='F'))), columns=['wind_dir', 'wind_speed', 'prevalence'])
+                    wind_rose.data = data
+                    wind_rose.n_bins_wd = N_bins_wd
+                    wind_rose.n_bins_ws = N_bins_ws
+                    return wind_rose
             case 'interpolate':
                 raise NotImplementedError("Interpolation not yet implemented")
             case _:

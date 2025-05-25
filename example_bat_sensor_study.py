@@ -30,9 +30,6 @@ datum = [621400, 6181000]
 # Select the wind-data as timeseries
 wind_data = 'data/example_site_1/wind_data.csv'
 
-# Set the resampling factor
-N_bins_wd, N_bins_ws = 5, 10
-
 # ------------ SCRIPT ------------
 
 # Set the random seed
@@ -106,6 +103,7 @@ array_ws_per_tod_bats[~indices_bat_activity.reshape((365, 5), order='C').T] = np
 
 # Convert the wind data to a wind-rose object
 wind_rose = moct.WindRose.from_ts(array_wd, array_ws, n_bins_wd=20, n_bins_ws=25)
+wind_rose_coarse = moct.WindRose.from_ts(array_wd, array_ws, n_bins_wd=20, n_bins_ws=5)
 
 # Convert the wind data to a wind-rose object, separated by bat activity
 wind_rose_no_bats = moct.WindRose.from_ts(array_wd[~indices_bat_activity], array_ws[~indices_bat_activity], n_bins_wd=20, n_bins_ws=25)
@@ -171,6 +169,39 @@ fig_tod.suptitle("Wind speed based on time-of-day")
 fig_wind_rose, ax_wind_rose = plot.wind_rose(wind_rose, threshold=cut_off_threshold)
 fig_wind_rose.suptitle("Wind rose")
 
+# Plot the wind rose, but as found normally
+fig_wind_rose_conv, ax_wind_rose_conv = plot.wind_rose_conv(wind_rose_coarse)
+fig_wind_rose_conv.suptitle("Wind rose, conventional")
+
+# Plot the wind rose, but with explanations
+fig_wind_rose_exp,  (ax_wind_rose_direction, ax_wind_rose_speed)  = plt.subplots(1, 2, subplot_kw=dict(projection='polar'))
+ax_wind_rose_direction.set_theta_direction('clockwise')
+ax_wind_rose_speed.set_theta_direction('clockwise')
+ax_wind_rose_direction.set_theta_zero_location('N')
+ax_wind_rose_speed.set_theta_zero_location('N')
+T, R = np.meshgrid(np.linspace(0, 2 * np.pi, wind_rose.n_bins_wd), np.linspace(0, 25, wind_rose.n_bins_ws))
+#: Construct the first masks, based on wind direction
+data_mask = wind_rose.data.copy()
+data_mask[~(np.bitwise_and(T > np.pi, T < 4/3 * np.pi))] = np.nan
+ax_wind_rose_direction.pcolormesh(T, R, wind_rose.data * 100, edgecolors='none', cmap='inferno', alpha=0.5)
+cs = ax_wind_rose_direction.pcolormesh(T, R, data_mask * 100, edgecolors='face', cmap='inferno')
+cbar = plt.colorbar(cs, ax=ax_wind_rose_direction)
+cbar.set_label('Prevalence (%)')
+ax_wind_rose_direction.set_title(f"Prevalence: {np.nansum(data_mask) * 100:.2f}%")
+ax_wind_rose_direction.set_xticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
+ax_wind_rose_direction.tick_params(axis='y', colors='green')
+#: Construct the second masks, based on wind speed
+data_mask = wind_rose.data.copy()
+data_mask[~(R[:, 0] > 10)] = np.nan
+ax_wind_rose_speed.pcolormesh(T, R, wind_rose.data * 100, edgecolors='none', cmap='inferno', alpha=0.5)
+cs = ax_wind_rose_speed.pcolormesh(T, R, data_mask * 100, edgecolors='face', cmap='inferno')
+cbar = plt.colorbar(cs, ax=ax_wind_rose_speed)
+cbar.set_label('Prevalence (%)')
+ax_wind_rose_speed.set_title(f"Prevalence: {np.nansum(data_mask) * 100:.2f}%")
+ax_wind_rose_speed.set_xticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
+ax_wind_rose_speed.tick_params(axis='y', colors='green')
+fig_wind_rose_exp.suptitle("Wind rose (explained)")
+
 # Plot the wind rose, separated by bat activity
 fig_wind_rose_bat_activity, (ax_wind_rose_no_bats, ax_wind_rose_bats)  = plt.subplots(1, 2, subplot_kw=dict(projection='polar'))
 ax_wind_rose_no_bats = plot.wind_rose(wind_rose_no_bats, threshold=cut_off_threshold, ax_exist=ax_wind_rose_no_bats)
@@ -184,5 +215,7 @@ fig_wind_rose_bat_activity.suptitle("Wind rose (separated by bat activity)")
 # plt.close(fig_ts)
 # plt.close(fig_tod)
 # plt.close(fig_wind_rose)
+# plt.close(fig_wind_rose_conv)
+# plt.close(fig_wind_rose_exp)
 # plt.close(fig_wind_rose_bat_activity)
 plt.show()

@@ -48,10 +48,19 @@ print(wind_rose)
 
 # ------------ PLOTTING ------------
 
+# Set the plotting parameters
+threshold = None
+N_bins_wd, N_bins_ws = 20, 5
+
 # Plot the wind rose
-fig_wind_rose, ax_wind_rose = plot.wind_rose(wind_rose, threshold=0.01, v_cutin_cutout=v_cutin_cutout)
+fig_wind_rose, ax_wind_rose = plot.wind_rose(wind_rose, threshold=threshold, v_cutin_cutout=v_cutin_cutout)
 fig_wind_rose.suptitle("Wind rose")
+
+# Plot the wind rose, conventional style
+fig_wind_rose_conv, ax_wind_rose_conv = plot.wind_rose_conv(wind_rose.resample(N_bins_wd, N_bins_ws, in_place=False))
+fig_wind_rose_conv.suptitle("Wind rose (conventional style)")
 
 # Show the plots
 # plt.close(fig_wind_rose)
+# plt.close(fig_wind_rose_conv)
 plt.show()
