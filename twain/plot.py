@@ -14,6 +14,7 @@ from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from matplotlib.path import Path as mpltPath
+import matplotlib as mpl
 import matplotlib.tri as tri
 
 from twain.moct import Scenario, ControlSetpoints, WindFarmModel, WindRose, SpatialArray
@@ -54,6 +55,9 @@ def layout(scenario: Scenario, control_setpoints: ControlSetpoints = None, ax_ex
     for wt_idx in range(array_layout.shape[0]):
         #: Extract and rotate the image
         # NOTE: 'sp.ndimage.rotate' uses clockwise rotation, so that's why the minus sign is used
+        # FIXME: How to handle an 'empty' scenario?
+        if scenario.theta is None:
+            scenario.theta = 270
         ab = AnnotationBbox(OffsetImage(sp.ndimage.rotate(plt.imread(PATH_WT_TOP_ICON), -(scenario.theta + control_setpoints.yaw_angles[wt_idx])), zoom=0.1), array_layout[wt_idx, :], frameon=False)
         ax.add_artist(ab)
         ax.annotate(scenario.wt_names[wt_idx], array_layout[wt_idx, :] + TEXT_OFFSET, fontsize=8)
@@ -170,7 +174,7 @@ def wind_rose(wind_rose: WindRose, threshold: float = None, v_cutin_cutout: tupl
         #: Create a figure
         fig = plt.figure()
         ax = fig.add_subplot(projection='polar')
-    #: Set oriantation parameters
+    #: Set orientation parameters
     # FROM: https://gist.github.com/phobson/41b41bdd157a2bcf6e14  # nopep8
     ax.set_theta_direction('clockwise')
     ax.set_theta_zero_location('N')
@@ -184,12 +188,57 @@ def wind_rose(wind_rose: WindRose, threshold: float = None, v_cutin_cutout: tupl
         wind_rose.data[R[:, 0] < v_cutin_cutout[0], :] = np.nan
         wind_rose.data[R[:, 0] > v_cutin_cutout[1], :] = np.nan
     #: Create a contour plot
-    cs = ax.pcolormesh(T, R, wind_rose.data, edgecolors='face', cmap='inferno')
+    cs = ax.pcolormesh(T, R, wind_rose.data * 100, edgecolors='face', cmap='inferno')
     #: Add a colorbar
-    cbar = fig.colorbar(cs, ax=ax)
+    cbar = plt.colorbar(cs, ax=ax)
     cbar.set_label('Prevalence (%)')
     #: Set the labels
     ax.set_xticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
+    #: Change the color of the y-labels
+    ax.tick_params(axis='y', colors='green')
+    #: Return the axis
+    if ax_exist is not None:
+        return ax
+    else:
+        return fig, ax
+    
+
+def wind_rose_conv(wind_rose: WindRose, ax_exist: Axes = None) -> tuple[Figure, Axes]:
+    """Plots a wind rose in a more conventional way, but based on time series data.
+    
+    """
+    #: Add to existing axes (if they exist)
+    if ax_exist is not None:
+        #: Set equal
+        fig, ax = None, ax
+    else:
+        #: Create a figure
+        fig = plt.figure()
+        ax = fig.add_subplot(projection='polar')
+    #: Set orientation parameters
+    # FROM: https://gist.github.com/phobson/41b41bdd157a2bcf6e14  # nopep8
+    ax.set_theta_direction('clockwise')
+    ax.set_theta_zero_location('N')
+    #: Extract the colormap
+    cmap = plt.get_cmap('inferno', wind_rose.n_bins_ws)
+    ws_boundaries = np.linspace(0, 25, wind_rose.n_bins_ws + 1)
+    bin_centers = 0.5 * (ws_boundaries[:-1] + ws_boundaries[1:])
+    norm = mpl.colors.BoundaryNorm(boundaries=ws_boundaries, ncolors=wind_rose.n_bins_ws)
+    #: Unravel the data
+    T = np.linspace(0, 2 * np.pi, wind_rose.n_bins_wd, endpoint=False)
+    for row in range(wind_rose.n_bins_ws):
+        #: Plot all the wind speeds
+        ax.bar(T, wind_rose.data[row, :] * 100, width=0.8 * (2 * np.pi) / wind_rose.n_bins_wd, bottom=np.sum(wind_rose.data[:row, :] * 100, axis=0) if row > 0 else 0, color=cmap(row))
+    # Add a discrete colorbar
+    sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, boundaries=ws_boundaries, ticks=bin_centers, pad=0.1)
+    cbar.set_label("Wind speed (in m/s)")
+    cbar.ax.set_yticklabels([f"{ws_boundaries[i]:.1f} - {ws_boundaries[i+1]:.1f}" for i in range(wind_rose.n_bins_ws)])
+    #: Set the labels
+    ax.set_xticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
+    ax.set_yticks(np.linspace(0, np.sum(wind_rose.data * 100, axis=0).max(), 6, endpoint=False))
+    ax.set_yticklabels([f"{i:.1f}%" for i in np.linspace(0, np.sum(wind_rose.data * 100, axis=0).max(), 6, endpoint=False)])
     #: Change the color of the y-labels
     ax.tick_params(axis='y', colors='green')
     #: Return the axis
