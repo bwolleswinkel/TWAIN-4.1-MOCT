@@ -25,7 +25,7 @@ wind_rose = 'data/la_haute_borne/wind_rose.csv'
 datum = [621400, 6181000]
 
 # Set the resampling factor
-N_bins_wd, N_bins_ws = None, None
+N_bins_wd, N_bins_ws = 36, 25
 
 # ------------ SCRIPT ------------
 
@@ -131,9 +131,6 @@ fig_layout.suptitle("Wind-farm layout")
 # Plot the wind rose
 fig_wind_rose, ax_wind_rose = plot.wind_rose(wind_rose, threshold=0.001)
 fig_wind_rose.suptitle("Wind rose")
-
-# TEMP
-print(utils.devisors(N_bins_wd))
 
 # Plot the difference in power production
 fig_diff_power, ax_diff_power = plt.subplots()

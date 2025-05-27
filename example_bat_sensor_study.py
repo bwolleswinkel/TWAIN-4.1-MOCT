@@ -170,7 +170,7 @@ fig_wind_rose, ax_wind_rose = plot.wind_rose(wind_rose, threshold=cut_off_thresh
 fig_wind_rose.suptitle("Wind rose")
 
 # Plot the wind rose, but as found normally
-fig_wind_rose_conv, ax_wind_rose_conv = plot.wind_rose_conv(wind_rose_coarse)
+fig_wind_rose_conv, ax_wind_rose_conv = plot.wind_rose_conv(wind_rose)
 fig_wind_rose_conv.suptitle("Wind rose, conventional")
 
 # Plot the wind rose, but with explanations
