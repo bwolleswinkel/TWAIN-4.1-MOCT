@@ -12,6 +12,7 @@ import numpy.typing as npt
 from tqdm import tqdm
 from floris import FlorisModel, WindRose as FlorisWindRose
 from floris.optimization.layout_optimization.layout_optimization_scipy import LayoutOptimizationScipy
+from floris.optimization.yaw_optimization.yaw_optimizer_sr import YawOptimizationSR
 from floris.optimization.yaw_optimization.yaw_optimizer_geometric import YawOptimizationGeometric
 
 # TODO: Remove this dependency
@@ -352,7 +353,7 @@ class Metrics:
             # NOTE: This assumes the array wt_power is of size (N_bins_wd, N_bins_ws, n_wt)
             aep = np.nansum(np.nansum(wt_power, axis=2) * (prevalence / 100)) * 31_536_000
         else:
-            aep = np.sum(wt_power) * 31_536_000
+            aep = np.sum(np.sum(wt_power, axis=1) * (31_536_000 / wt_power.shape[0])) 
         #: Return the result
         return aep
     
@@ -524,6 +525,21 @@ def optimal_wake_steering(problem: OptProblem, N_iter: int = 100, N_swarm: int =
             yaw_angles_opt_geo = np.squeeze(np.vstack(df_opt_geo.yaw_angles_opt).T)
             #: Create the operating setpoints
             control_setpoints = ControlSetpoints(yaw_angles=yaw_angles_opt_geo, power_setpoints=np.ones(problem.scenario.n_wt))
+        case 'serial-refine':
+            #: Create a surrogate wind farm and metrics model
+            # TODO: Move this to the class WindFarmModel
+            fmodel = FlorisModel('./config/floris/config_floris_farm.yaml')
+            fmodel.set(layout_x=problem.scenario.wf_layout['x'], layout_y=problem.scenario.wf_layout['y'])
+            # TODO: Move the methodology 'ensure_list' to the class WindFarmModel itself
+            fmodel.set(turbulence_intensities=utils.ensure_list(problem.scenario.TI), wind_directions=utils.ensure_list(problem.scenario.theta), wind_speeds=utils.ensure_list(problem.scenario.U_inf))
+            #: Compute the optimal yaw angles
+            # FROM: https://nrel.github.io/floris/examples/examples_control_optimization/006_compare_yaw_optimizers.html  # nopep8
+            yaw_opt_sr = YawOptimizationSR(fmodel)
+            df_opt_sr = yaw_opt_sr.optimize()
+            # FIXME: I don't know what the correct shape should be here...
+            yaw_angles_opt_sr = np.squeeze(np.vstack(df_opt_sr.yaw_angles_opt).T)
+            #: Create the operating setpoints
+            control_setpoints = ControlSetpoints(yaw_angles=yaw_angles_opt_sr, power_setpoints=np.ones(problem.scenario.n_wt))
         case _:
             raise ValueError(f"Unrecognized optimization method '{problem.opt_method}'")
     # TEMP: plot iterations of PSO
