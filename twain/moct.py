@@ -368,6 +368,189 @@ class Metrics:
         #: Return the result
         return lcoe
     
+    # ------ PLACEHOLDER FUNCTIONS ------
+
+    def calc_aep(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, downtime: str = None, params = None) -> float:
+        """Calculate the annual energy production (AEP) based on the wind farm layout and wind conditions. The AEP is calculated by summing the power production of each wind turbine over all scenarios, and multiplying this generated power by the time duration for each scenario.
+        
+        Parameters
+        ----------
+        ambient_cond : np.ndarray
+            Ambient conditions, i.e., a N_scn x 3 array of wind speed, wind direction, and turbulence intensity for each scenario. Note that N_scn is the number of scenarios.
+        theta : list
+            Decision variable consisting of θ = [γ, η], where γ is a N_scn x N_wt array of yaw angles (in deg) and η is a N_scn x N_wr array of power setpoints (in -). Note that N_wt are the number of wind turbines, and N_scn are the number of scenarios. A scenario is a triple of ambent conditions (wind_speed, wind_direction, turbulence_intensity).
+        data_type : str
+            Type of data to be used for the calculation. This can be 'distribution' or 'time_series'.
+        downtime : str
+            Type of downtime to be used for the calculation. By default, the turbines are assumed to be operational for the entire year.
+        params : dict
+            Dictionary containing additional params. In the case of distributional data, params should contain the key 'prevalence', which is (flattened) N_scn vector of the prevalence of each scenario. In the parameter `downtime = dist`, then params should contain the key 'downtime', which is a N_scn vector of the downtime for each scenario (a number between 0 and 1 indicating the percentage of downtime in that scenario. Note that if time series data is provided, then, logically, downtime should be `0` or `1` for each entry).
+
+        """
+        raise NotImplementedError("Annual energy production not yet implemented")
+
+    def calc_ar(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, data_elec, downtime: str = None, params = None) -> float:
+        """Calculate the annual revenue (AR) based on the wind farm layout and wind conditions. The ARP is calculated by multiplying the power production for each scenario (i.e., set of ambient conditions) with an electricity price.
+        
+        Parameters
+        ----------
+        ambient_cond : np.ndarray
+            Ambient conditions, i.e., a N_scn x 3 array of wind speed, wind direction, and turbulence intensity for each scenario. Note that N_scn is the number of scenarios.
+        theta : list
+            Decision variable consisting of θ = [γ, η], where γ is a N_scn x N_wt array of yaw angles (in deg) and η is a N_scn x N_wr array of power setpoints (in -). Note that N_wt are the number of wind turbines, and N_scn are the number of scenarios. A scenario is a triple of ambient conditions (wind_speed, wind_direction, turbulence_intensity).
+        data_type : str
+            Type of data to be used for the calculation. This can be 'distribution' or 'time_series'.
+        data_elec : str
+            Type of electricity price data to be used for the ARP calculation. This can be a fixed value (e.g., 0.05 for 5 cents/kWh), or a time series of electricity prices, of a distribution of electricity prices based on the ambient conditions.
+        downtime : str
+            Type of downtime to be used for the calculation. By default, the turbines are assumed to be operational for the entire year.
+        data : dict
+            Dictionary containing additional data. In the case of distributional data, data should contain the key 'prevalence', which is (flattened) N_scn vector of the prevalence of each scenario. In the parameter `downtime = dist`, then data should contain the key 'downtime', which is a N_scn vector of the downtime for each scenario (a number between 0 and 1 indicating the percentage of downtime in that scenario. Note that if time series data is provided, then, logically, downtime should be `0` or `1` for each entry).
+
+        """
+        raise NotImplementedError("Annual revenue calculation not yet implemented")
+
+    def calc_ap(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, data_elec, model_oem, downtime: str = None, params = None) -> float:
+        """Calculate the annual profit (AR) based on the wind farm layout and wind conditions. The ARP is calculated by multiplying the power production for each scenario (i.e., set of ambient conditions) with an electricity price, and subtracting the costs of operation and maintenance (O&M) costs (the likelihood/height can be influenced, i.e., decreased of increased, by different control strategies), and the costs of wind farm control itself (CAPEX). The CAPEX is assumed to be a fixed value.
+        
+        Parameters
+        ----------
+        ambient_cond : np.ndarray
+            Ambient conditions, i.e., a N_scn x 3 array of wind speed, wind direction, and turbulence intensity for each scenario. Note that N_scn is the number of scenarios.
+        theta : list
+            Decision variable consisting of θ = [γ, η], where γ is a N_scn x N_wt array of yaw angles (in deg) and η is a N_scn x N_wr array of power setpoints (in -). Note that N_wt are the number of wind turbines, and N_scn are the number of scenarios. A scenario is a triple of ambient conditions (wind_speed, wind_direction, turbulence_intensity).
+        data_type : str
+            Type of data to be used for the calculation. This can be 'distribution' or 'time_series'.
+        data_elec : str
+            Type of electricity price data to be used for the ARP calculation. This can be a fixed value (e.g., 0.05 for 5 cents/kWh), or a time series of electricity prices, of a distribution of electricity prices based on the ambient conditions.
+        model_oem : callable
+            Callable function which computes the O&M costs based on the ambient conditions and the control setpoints. This can be a simple function which returns a fixed value, or a more complex function which computes the O&M costs based on the ambient conditions and the control setpoints. The function should be called as model_oem(ambient_cond, theta). The callable function itself could/should be constructed as model_oem = get_oem_model(alpha), where alpha are parameters which tune the model. Alternatively, the model might require data itself.
+        downtime : str
+            Type of downtime to be used for the calculation. By default, the turbines are assumed to be operational for the entire year.
+        data : dict
+            Dictionary containing additional data. In the case of distributional data, data should contain the key 'prevalence', which is (flattened) N_scn vector of the prevalence of each scenario. In the parameter `downtime = dist`, then data should contain the key 'downtime', which is a N_scn vector of the downtime for each scenario (a number between 0 and 1 indicating the percentage of downtime in that scenario. Note that if time series data is provided, then, logically, downtime should be `0` or `1` for each entry).
+
+        """
+        raise NotImplementedError("Annual profit calculation not yet implemented")
+
+    def calc_lifetime(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, downtime: str = None, params = None) -> float:
+        """Calculate the lifetime of the wind farm based on the wind farm layout and wind conditions. The lifetime is calculated by taking into account the control actions over all different N_scn, and are a number in life-time.
+        
+        Parameters
+        ----------
+        ambient_cond : np.ndarray
+            Ambient conditions, i.e., a N_scn x 3 array of wind speed, wind direction, and turbulence intensity for each scenario. Note that N_scn is the number of scenarios.
+        theta : list
+            Decision variable consisting of θ = [γ, η], where γ is a N_scn x N_wt array of yaw angles (in deg) and η is a N_scn x N_wr array of power setpoints (in -). Note that N_wt are the number of wind turbines, and N_scn are the number of scenarios. A scenario is a triple of ambient conditions (wind_speed, wind_direction, turbulence_intensity).
+        data_type : str
+            Type of data to be used for the calculation. This can be 'distribution' or 'time_series'.
+        downtime : str
+            Type of downtime to be used for the calculation. By default, the turbines are assumed to be operational for the entire year.
+        params : dict
+            Dictionary containing additional params. In the case of distributional data, params should contain the key 'prevalence', which is (flattened) N_scn vector of the prevalence of each scenario. In the parameter `downtime = dist`, then params should contain the key 'downtime', which is a N_scn vector of the downtime for each scenario (a number between 0 and 1 indicating the percentage of downtime in that scenario. Note that if time series data is provided, then, logically, downtime should be `0` or `1` for each entry).
+
+        """
+        raise NotImplementedError("Lifetime calculation not yet implemented")
+    
+    def calc_lep(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, downtime: str = None, params = None) -> float:
+        """Calculate the liftime energy production (LEP) based on the wind farm layout and wind conditions. The LEP is calculated by multiplying annual energy production by the lifetime of the wind farm.
+        
+        Parameters
+        ----------
+        ambient_cond : np.ndarray
+            Ambient conditions, i.e., a N_scn x 3 array of wind speed, wind direction, and turbulence intensity for each scenario. Note that N_scn is the number of scenarios.
+        theta : list
+            Decision variable consisting of θ = [γ, η], where γ is a N_scn x N_wt array of yaw angles (in deg) and η is a N_scn x N_wr array of power setpoints (in -). Note that N_wt are the number of wind turbines, and N_scn are the number of scenarios. A scenario is a triple of ambient conditions (wind_speed, wind_direction, turbulence_intensity).
+        data_type : str
+            Type of data to be used for the calculation. This can be 'distribution' or 'time_series'.
+        downtime : str
+            Type of downtime to be used for the calculation. By default, the turbines are assumed to be operational for the entire year.
+        params : dict
+            Dictionary containing additional params. In the case of distributional data, params should contain the key 'prevalence', which is (flattened) N_scn vector of the prevalence of each scenario. In the parameter `downtime = dist`, then params should contain the key 'downtime', which is a N_scn vector of the downtime for each scenario (a number between 0 and 1 indicating the percentage of downtime in that scenario. Note that if time series data is provided, then, logically, downtime should be `0` or `1` for each entry).
+
+        """
+        raise NotImplementedError("Levelized energy production calculation not yet implemented")
+    
+    def calc_lr(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, downtime: str = None, params = None) -> float:
+        """Calculate the lifetime revenue (LR) based on the wind farm layout and wind conditions. The LR is calculated by multiplying the annual revenue by the lifetime of the wind farm.
+        
+        Parameters
+        ----------
+        ambient_cond : np.ndarray
+            Ambient conditions, i.e., a N_scn x 3 array of wind speed, wind direction, and turbulence intensity for each scenario. Note that N_scn is the number of scenarios.
+        theta : list
+            Decision variable consisting of θ = [γ, η], where γ is a N_scn x N_wt array of yaw angles (in deg) and η is a N_scn x N_wr array of power setpoints (in -). Note that N_wt are the number of wind turbines, and N_scn are the number of scenarios. A scenario is a triple of ambient conditions (wind_speed, wind_direction, turbulence_intensity).
+        data_type : str
+            Type of data to be used for the calculation. This can be 'distribution' or 'time_series'.
+        downtime : str
+            Type of downtime to be used for the calculation. By default, the turbines are assumed to be operational for the entire year.
+        params : dict
+            Dictionary containing additional params. In the case of distributional data, params should contain the key 'prevalence', which is (flattened) N_scn vector of the prevalence of each scenario. In the parameter `downtime = dist`, then params should contain the key 'downtime', which is a N_scn vector of the downtime for each scenario (a number between 0 and 1 indicating the percentage of downtime in that scenario. Note that if time series data is provided, then, logically, downtime should be `0` or `1` for each entry).
+
+        """
+        return self.calc_ar(ambient_cond, theta, data_type, downtime, params) * self.calc_lifetime(ambient_cond, theta, data_type, downtime, params)
+    
+    def calc_lp(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, data_elec, downtime: str = None, params = None) -> float:
+        """Calculate the limetime profit (LP) based on the wind farm layout and wind conditions. The LP is calculated by multiplying the annual profit by the lifetime of the wind farm.
+        
+        Parameters
+        ----------
+        ambient_cond : np.ndarray
+            Ambient conditions, i.e., a N_scn x 3 array of wind speed, wind direction, and turbulence intensity for each scenario. Note that N_scn is the number of scenarios.
+        theta : list
+            Decision variable consisting of θ = [γ, η], where γ is a N_scn x N_wt array of yaw angles (in deg) and η is a N_scn x N_wr array of power setpoints (in -). Note that N_wt are the number of wind turbines, and N_scn are the number of scenarios. A scenario is a triple of ambient conditions (wind_speed, wind_direction, turbulence_intensity).
+        data_type : str
+            Type of data to be used for the calculation. This can be 'distribution' or 'time_series'.
+        data_elec : str
+            Type of electricity price data to be used for the LP calculation. This can be a fixed value (e.g., 0.05 for 5 cents/kWh), or a time series of electricity prices, of a distribution of electricity prices based on the ambient conditions.
+        downtime : str
+            Type of downtime to be used for the calculation. By default, the turbines are assumed to be operational for the entire year.
+        data : dict
+            Dictionary containing additional data. In the case of distributional data, data should contain the key 'prevalence', which is (flattened) N_scn vector of the prevalence of each scenario. In the parameter `downtime = dist`, then data should contain the key 'downtime', which is a N_scn vector of the downtime for each scenario (a number between 0 and 1 indicating the percentage of downtime in that scenario. Note that if time series data is provided, then, logically, downtime should be `0` or `1` for each entry).
+
+        """
+        return self.calc_ap(ambient_cond, theta, data_type, downtime, params) * self.calc_lifetime(ambient_cond, theta, data_type, data_elec, downtime, params)
+    
+    def calc_aanp(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, noise_area: SpatialArray | list[np.ndarray], params = None) -> float:
+        """Calculate the average anual noise production (AANP) based on the wind farm layout and wind conditions. The AANP is calculcated by producing the noise field based on the wind farm layout and the ambient conditions, and then averaging the noise field over the area of interest (i.e., the `noise area`). The anual average is then calculated by means of summing these averages.
+        
+        Parameters
+        ----------
+        ambient_cond : np.ndarray
+            Ambient conditions, i.e., a N_scn x 3 array of wind speed, wind direction, and turbulence intensity for each scenario. Note that N_scn is the number of scenarios.
+        theta : list
+            Decision variable consisting of θ = [γ, η], where γ is a N_scn x N_wt array of yaw angles (in deg) and η is a N_scn x N_wr array of power setpoints (in -). Note that N_wt are the number of wind turbines, and N_scn are the number of scenarios. A scenario is a triple of ambient conditions (wind_speed, wind_direction, turbulence_intensity).
+        data_type : str
+            Type of data to be used for the calculation. This can be 'distribution' or 'time_series'.
+        noise_area : SpatialArray | list[np.ndarray]
+            Spatial array which contains the noise area of interest, i.e., either a SpatialArray with the noise mask (e.g, a residential area), or a list of coordinates of measurement points (e.g., noise measurement).
+        params : dict
+            Dictionary containing additional params. In the case of distributional data, params should contain the key 'prevalence', which is (flattened) N_scn vector of the prevalence of each scenario. In the parameter `downtime = dist`, then params should contain the key 'downtime', which is a N_scn vector of the downtime for each scenario (a number between 0 and 1 indicating the percentage of downtime in that scenario. Note that if time series data is provided, then, logically, downtime should be `0` or `1` for each entry).
+
+        """
+        raise NotImplementedError("Average annual noise production not yet implemented")
+    
+    def calc_aaa(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, noise_area: SpatialArray | list[npt.ArrayLike], weighting: callable | np.ndarray, params = None) -> float:
+        """Calculate the average annual annoyance (AAA) based on the wind farm layout, operational control setpoints, and wind conditions. The average annual annoyance is calculated by weighting the noise production with the annoyance factor for each scenario, and then averaging this over all scenarios. The annoyance factor is a function of the noise level, and can be based on a distribution or a time series.
+        
+        Parameters
+        ----------
+        ambient_cond : np.ndarray
+            Ambient conditions, i.e., a N_scn x 3 array of wind speed, wind direction, and turbulence intensity for each scenario. Note that N_scn is the number of scenarios.
+        theta : list
+            Decision variable consisting of θ = [γ, η], where γ is a N_scn x N_wt array of yaw angles (in deg) and η is a N_scn x N_wr array of power setpoints (in -). Note that N_wt are the number of wind turbines, and N_scn are the number of scenarios. A scenario is a triple of ambient conditions (wind_speed, wind_direction, turbulence_intensity).
+        data_type : str
+            Type of data to be used for the calculation. This can be 'distribution' or 'time_series'.
+        noise_area : SpatialArray | list[np.ndarray]
+            Spatial array which contains the noise area of interest, i.e., either a SpatialArray with the noise mask (e.g, a residential area), or a list of coordinates of measurement points (e.g., noise measurement).
+        weighting: Callable | np.ndarray
+            Weighting function or array which computes the annoyance factor based on the noise level. This can be a callable function which takes the noise level as input and returns the annoyance factor, or a numpy array which weights the noise level based on a predefined annoyance factor.
+        params : dict
+            Dictionary containing additional params. In the case of distributional data, params should contain the key 'prevalence', which is (flattened) N_scn vector of the prevalence of each scenario. In the parameter `downtime = dist`, then params should contain the key 'downtime', which is a N_scn vector of the downtime for each scenario (a number between 0 and 1 indicating the percentage of downtime in that scenario. Note that if time series data is provided, then, logically, downtime should be `0` or `1` for each entry).
+
+        """
+        raise NotImplementedError("Average annual annoyance calculation not yet implemented")
+    
 
 class SpatialArray:
     """ Class which stores an array value f, based on coordinates x, y (and z), and has special slicing operations.
