@@ -17,12 +17,20 @@ from twain.moct import WindFarmModel
 
 # Select the wind-farm layout
 layout = 'data/la_haute_borne/wf_layout.csv'
+# TEMP
+#
+layout = 'data/lillgrund/wf_layout.csv'
+#
 
 # Select the directory with the wind-rose data
 wind_rose = 'data/la_haute_borne/wind_rose.csv'
 
 # Set a new datum
 datum = [621400, 6181000]
+# TEMP
+#
+datum = [358000, 6152000]
+#
 
 # Set the resampling factor
 N_bins_wd, N_bins_ws = 36, 25
@@ -119,6 +127,10 @@ print(f"Geometric AEP: {geometric_aep * 1E-9 / 3600:.2f} GWh (\033[34m{'+' if np
 
 # Set the viewing range
 xy_range = [[0, 2500], [0, 2500]]
+# TEMP
+#
+xy_range = [[0, 5000], [0, 4000]]
+#
 
 # Plot the wind-farm layout
 fig_layout, ax_layout = plt.subplots()

@@ -371,7 +371,7 @@ class Metrics:
     # ------ PLACEHOLDER FUNCTIONS ------
 
     def calc_aep(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, downtime: str = None, params = None) -> float:
-        """Calculate the annual energy production (AEP) based on the wind farm layout and wind conditions. The AEP is calculated by summing the power production of each wind turbine over all scenarios, and multiplying this generated power by the time duration for each scenario.
+        """Calculate the annual energy production (AEP) based on the wind farm layout and wind conditions. The AEP is calculated by summing the power production of each wind turbine over all scenarios, and multiplying this generated power by the time duration for each scenario. The AEP is expressed in kWh/year.
         
         Parameters
         ----------
@@ -387,10 +387,28 @@ class Metrics:
             Dictionary containing additional params. In the case of distributional data, params should contain the key 'prevalence', which is (flattened) N_scn vector of the prevalence of each scenario. In the parameter `downtime = dist`, then params should contain the key 'downtime', which is a N_scn vector of the downtime for each scenario (a number between 0 and 1 indicating the percentage of downtime in that scenario. Note that if time series data is provided, then, logically, downtime should be `0` or `1` for each entry).
 
         """
-        raise NotImplementedError("Annual energy production not yet implemented")
+        #: Check if the data is distributional or time series
+        match data_type:
+            case 'distribution':
+                #: Extract the prevalence from the params
+                prevalence = params['prevalence']
+                #: Calculate the power
+                power = self.wfm.power(ambient_cond, theta) 
+                #: Calculate the AEP
+                aep = np.sum(prevalence * (np.sum(power, axis=1) * 31_536_000))
+            case 'time_series':
+                #: Extract the number of scenarios
+                N_scn = ambient_cond.shape[0]
+                #: Calculate the power
+                power = self.wfm.power(ambient_cond, theta) 
+                #: Calculate the AEP
+                aep = np.sum(np.sum(power, axis=1) * (31_536_000 / N_scn))
+            case _:
+                raise ValueError(f"Unrecognized data type '{data_type}' for AEP calculation")
+        return aep
 
     def calc_ar(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, data_elec, downtime: str = None, params = None) -> float:
-        """Calculate the annual revenue (AR) based on the wind farm layout and wind conditions. The ARP is calculated by multiplying the power production for each scenario (i.e., set of ambient conditions) with an electricity price.
+        """Calculate the annual revenue (AR) based on the wind farm layout and wind conditions. The AR is calculated by multiplying the power production for each scenario (i.e., set of ambient conditions) with an electricity price. The AR is expressed in €/year or $/year.
         
         Parameters
         ----------
@@ -411,7 +429,7 @@ class Metrics:
         raise NotImplementedError("Annual revenue calculation not yet implemented")
 
     def calc_ap(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, data_elec, model_oem, downtime: str = None, params = None) -> float:
-        """Calculate the annual profit (AR) based on the wind farm layout and wind conditions. The ARP is calculated by multiplying the power production for each scenario (i.e., set of ambient conditions) with an electricity price, and subtracting the costs of operation and maintenance (O&M) costs (the likelihood/height can be influenced, i.e., decreased of increased, by different control strategies), and the costs of wind farm control itself (CAPEX). The CAPEX is assumed to be a fixed value.
+        """Calculate the annual profit (AR) based on the wind farm layout and wind conditions. The ARP is calculated by multiplying the power production for each scenario (i.e., set of ambient conditions) with an electricity price, and subtracting the of operation and maintenance (O&M or OPEX) costs (the likelihood/height of which can be influenced, i.e., decreased of increased, by different control strategies), and the costs of wind farm control itself (CAPEX, fixed cost per year in terms of a subscription model). The CAPEX is assumed to be a fixed value. The AP is expressed in €/year or $/year.
         
         Parameters
         ----------
@@ -434,7 +452,7 @@ class Metrics:
         raise NotImplementedError("Annual profit calculation not yet implemented")
 
     def calc_lifetime(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, downtime: str = None, params = None) -> float:
-        """Calculate the lifetime of the wind farm based on the wind farm layout and wind conditions. The lifetime is calculated by taking into account the control actions over all different N_scn, and are a number in life-time.
+        """Calculate the lifetime of the wind farm based on the wind farm layout and wind conditions. The lifetime is calculated by taking into account the control actions over all different N_scn, and is calculated based on fatigue, which itself depends on the loads (which are a function of the operational control actions). The lifetime is expressed in years.
         
         Parameters
         ----------
@@ -453,7 +471,7 @@ class Metrics:
         raise NotImplementedError("Lifetime calculation not yet implemented")
     
     def calc_lep(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, downtime: str = None, params = None) -> float:
-        """Calculate the liftime energy production (LEP) based on the wind farm layout and wind conditions. The LEP is calculated by multiplying annual energy production by the lifetime of the wind farm.
+        """Calculate the liftime energy production (LEP) based on the wind farm layout and wind conditions. The LEP is calculated by multiplying annual energy production by the lifetime of the wind farm. The LEP is expressed in kWh.
         
         Parameters
         ----------
@@ -472,7 +490,7 @@ class Metrics:
         raise NotImplementedError("Levelized energy production calculation not yet implemented")
     
     def calc_lr(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, downtime: str = None, params = None) -> float:
-        """Calculate the lifetime revenue (LR) based on the wind farm layout and wind conditions. The LR is calculated by multiplying the annual revenue by the lifetime of the wind farm.
+        """Calculate the lifetime revenue (LR) based on the wind farm layout and wind conditions. The LR is calculated by multiplying the annual revenue by the lifetime of the wind farm. The LR is expressed in € or $.
         
         Parameters
         ----------
@@ -491,7 +509,7 @@ class Metrics:
         return self.calc_ar(ambient_cond, theta, data_type, downtime, params) * self.calc_lifetime(ambient_cond, theta, data_type, downtime, params)
     
     def calc_lp(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, data_elec, downtime: str = None, params = None) -> float:
-        """Calculate the limetime profit (LP) based on the wind farm layout and wind conditions. The LP is calculated by multiplying the annual profit by the lifetime of the wind farm.
+        """Calculate the limetime profit (LP) based on the wind farm layout and wind conditions. The LP is calculated by multiplying the annual profit by the lifetime of the wind farm. The LP is expressed in € or $.
         
         Parameters
         ----------
@@ -512,7 +530,7 @@ class Metrics:
         return self.calc_ap(ambient_cond, theta, data_type, downtime, params) * self.calc_lifetime(ambient_cond, theta, data_type, data_elec, downtime, params)
     
     def calc_aanp(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, noise_area: SpatialArray | list[np.ndarray], params = None) -> float:
-        """Calculate the average anual noise production (AANP) based on the wind farm layout and wind conditions. The AANP is calculcated by producing the noise field based on the wind farm layout and the ambient conditions, and then averaging the noise field over the area of interest (i.e., the `noise area`). The anual average is then calculated by means of summing these averages.
+        """Calculate the average anual noise production (AANP) based on the wind farm layout and wind conditions. The AANP is calculcated by producing the noise field based on the wind farm layout and the ambient conditions, and then averaging the noise field over the area of interest (i.e., the `noise area`). The anual average is then calculated by means of summing these averages. The AANP is expressed in dB.
         
         Parameters
         ----------
@@ -531,7 +549,7 @@ class Metrics:
         raise NotImplementedError("Average annual noise production not yet implemented")
     
     def calc_aaa(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, noise_area: SpatialArray | list[npt.ArrayLike], weighting: callable | np.ndarray, params = None) -> float:
-        """Calculate the average annual annoyance (AAA) based on the wind farm layout, operational control setpoints, and wind conditions. The average annual annoyance is calculated by weighting the noise production with the annoyance factor for each scenario, and then averaging this over all scenarios. The annoyance factor is a function of the noise level, and can be based on a distribution or a time series.
+        """Calculate the average annual annoyance (AAA) based on the wind farm layout, operational control setpoints, and wind conditions. The average annual annoyance is calculated by weighting the noise production with the annoyance factor for each scenario, and then averaging this over all scenarios. The annoyance factor is a function of the noise level, and can be based on a distribution or a time series. The AAA is expressed in a dimensionless number, ranging from 0 to a 100.
         
         Parameters
         ----------
@@ -557,6 +575,7 @@ class SpatialArray:
 
     # TODO: Subclass a numpy array, and implement the __getitem__ method to allow for slicing
     # FROM: https://numpy.org/doc/stable/user/basics.subclassing.html
+    
     """
     
     def __init__(self, spatial: list[NPArray[float], ...], data: NPArray[float]) -> SpatialArray:
