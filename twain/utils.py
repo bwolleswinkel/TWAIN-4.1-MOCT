@@ -33,6 +33,11 @@ def ensure_list(obj) -> list:
             return ValueError(f"Unsupported type '{type(obj)}'")
         
 
+def find_datum(array: NPArray[float]) -> list[float, float]:
+    #: Round smallest element down to the nearest multiple of 1000
+    return np.floor(np.min(array, axis=0) / 1000) * 1000
+        
+
 def devisors(n: int) -> NPArray[int]:
     # FROM: https://stackoverflow.com/questions/171765/what-is-the-best-way-to-get-all-the-divisors-of-a-number
     divs = [1]

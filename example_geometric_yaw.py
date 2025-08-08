@@ -10,16 +10,13 @@ import pandas as pd
 from yaml import safe_load
 import matplotlib.pyplot as plt
 
-from twain import moct, plot
+from twain import moct, plot, utils
 from twain.moct import WindFarmModel
 
 # ------------ PARAMETERS ------------
 
 # Select the wind-farm layout
-layout = 'data/la_haute_borne/wf_layout.csv'
-
-# Set a new datum
-datum = [621400, 6181000]
+layout = 'data/schkortleben/wf_layout.csv'
 
 # Select the scenario parameters
 U_inf = 8.0  # Mean wind speed, in m/s
@@ -43,7 +40,11 @@ match path_layout.suffix:
         raise ValueError(f"Unrecognized file format '{path_layout.suffix}")
     
 # Convert to numpy array
-array_layout = df_layout[['x', 'y']].to_numpy() - datum
+array_layout = df_layout[['x', 'y']].to_numpy()
+
+# Get a datum
+datum = utils.find_datum(array_layout)
+array_layout -= datum
 
 # Create the scenario
 scenario = moct.Scenario(wf_layout=array_layout, U_inf=U_inf, theta=theta, TI=turb_intensity, wt_names=df_layout['name'])
