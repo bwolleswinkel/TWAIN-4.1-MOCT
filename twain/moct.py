@@ -304,7 +304,7 @@ class WindFarmModel:
                 fmodel.set(yaw_angles=[control_setpoints.yaw_angles])
                 if control_setpoints.power_setpoints is not None:
                     fmodel.set_operation_model("simple-derating")
-                    fmodel.set(power_setpoints=[control_setpoints.power_setpoints * 1E7])
+                    fmodel.set(power_setpoints=[control_setpoints.power_setpoints])
                 #: Run the model
                 fmodel.run()
                 #: Extract the flow field
