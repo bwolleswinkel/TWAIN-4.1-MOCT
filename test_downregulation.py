@@ -52,7 +52,8 @@ scenario = moct.Scenario(wf_layout=array_layout, U_inf=U_inf, theta=theta, TI=tu
 n_wt = scenario.n_wt
 
 # Solve the problem
-optimal_control_setpoints = moct.ControlSetpoints(np.zeros(n_wt), np.array([3, 3, 3]))
+# optimal_control_setpoints = moct.ControlSetpoints(np.zeros(n_wt), np.array([0.73, 1.06, 5]) * 1E6)
+optimal_control_setpoints = moct.ControlSetpoints(np.zeros(n_wt), None)
 
 # ------------ PLOTTING ------------
 
