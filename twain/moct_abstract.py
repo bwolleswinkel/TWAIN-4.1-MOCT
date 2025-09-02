@@ -410,8 +410,6 @@ class GeometricYawOptimizer(Optimizer):
         self.wfm = wfm
         self.metric = metric
         self.constraints = constraints
-        # TEMP
-        print(f"The metric {metric.__name__} was successfully passed")
         #: Check the arguments
         if wfm.__class__ is not FLORISModel:
             raise ValueError("Only the FLORIS wind farm model is supported for geometric wake steering")
