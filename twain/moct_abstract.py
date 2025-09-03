@@ -4,9 +4,18 @@
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from pathlib import Path
+import warnings
 
 import numpy as np
 import numpy.typing as npt
+import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
+from floris import FlorisModel
+import floris.layout_visualization as layoutviz
+from floris.flow_visualization import visualize_cut_plane
+from floris.optimization.yaw_optimization.yaw_optimizer_geometric import YawOptimizationGeometric
+from floris.optimization.yaw_optimization.yaw_optimizer_scipy import YawOptimizationScipy
 
 # ====== DECORATORS AND WRAPPERS ======
 
@@ -110,6 +119,8 @@ class ExtendedABC(metaclass=CombinedMeta):
 
 class WindTurbineModel(ABC):
     """Upper-level class which defines a wind turbine model.
+
+    # FIXME: Actually, this should also be just classbased methods and properties... Just like Metrics
     
     """
     @abstractmethod
@@ -155,6 +166,7 @@ class WindFarmModel(ABC):
     def __init__(self, wind_turbine_model: WindTurbineModel):
         pass
 
+    @abstractmethod
     def get_turbine_power(self, amb_cond: AmbientConditions, op_setpoints: OperationalControlSetpoints):
         """Get the power output of the turbines in the wind farm.
 
@@ -166,6 +178,7 @@ class WindFarmModel(ABC):
         """
         raise NotImplementedError("This function should be overwritten by the inheritance class, but it is not implemented correctly")
 
+    @abstractmethod
     def get_load_channels(self, amb_cond: AmbientConditions, op_setpoints: OperationalControlSetpoints):
         """Get the fatigue loads on the turbines in the wind farm.
 
@@ -177,6 +190,7 @@ class WindFarmModel(ABC):
         """
         raise NotImplementedError("This function should be overwritten by the inheritance class, but it is not implemented correctly")
 
+    @abstractmethod
     def get_noise_levels(self, amb_cond: AmbientConditions, op_setpoints: OperationalControlSetpoints, obs_loc: npt.ArrayLike):
         """Get the noise levels for several observation locations.
 
@@ -201,6 +215,8 @@ class WindFarmModel(ABC):
 class Metric(ExtendedABC):
     """Class representing a metric for the performance of operational control setpoints and ambient conditions
 
+    # FIXME: Maybe make a distinction between instantaneous metrics and accumulated metrics (also to do with constraints)
+
     """
     _is_coupled = None  # NOTE: These fields need to be set in the inheriting class
     _is_numeric = None
@@ -211,18 +227,9 @@ class Metric(ExtendedABC):
         'units': "Class attribute 'units' is read-only."
     }
 
-    # FIXME: Maybe this should not be a class-method...
-    @classmethod
-    @abstractmethod
-    def eval(cls, a, b, c) -> float:
-        """Evaluate the metric for a wind farm model, a list of ambient conditions, and a list of operational control setpoints.
-
-        """
-        raise NotImplementedError(f"This method should have been overwritten by the inheriting class '{cls.__name__}' but was not implemented.")
-    
-    @classmethod
-    def eval_decoupled(cls, a, b, c) -> float:
-        pass
+    def __new__(cls, *args, **kwargs):
+        # FIXME: What we could do instead... is make it such that `__new__` actually functions as `__call__` (or `eval` for that matter)? So it doesn't require instantiation, but actually it does not give use the freedom to do multiple calculations...
+        raise TypeError("Cannot instantiate an object of the superclass Metric. Instead, use the (instance)methods of the subclass directly.")
     
     @classproperty
     def is_coupled(cls):
@@ -242,14 +249,71 @@ class Metric(ExtendedABC):
             raise AttributeError("The variable '_units' needs to be set in the inheriting class, and cannot be None.")
         return cls._units
     
+    @classproperty
+    def name(self) -> str:
+        return self.__name__
 
-class Optimizer(ABC):
+    @name.setter
+    def name(self, value: str):
+        raise ValueError("The name of a metric is fixed and cannot be changed.")
+
+    # FIXME: Maybe this should not be a class-method..., maybe it should be a staticmethod? No actually it should not be, it should be a classmethod.
+    @classmethod
+    @abstractmethod
+    def eval(cls, a, b, c) -> float:
+        """Evaluate the metric for a wind farm model, a list of ambient conditions, and a list of operational control setpoints.
+
+        """
+        raise NotImplementedError(f"This method should have been overwritten by the inheriting class '{cls.__name__}' but was not implemented.")
+    
+    @classmethod
+    def eval_decoupled(cls, a, b, c) -> float:
+        pass
+    
+
+class Constraint():
+    """Class representing a constraint for the optimization problem.
+
+    # FIXME: I think its overly restrictive to make these properties read-only
+
+    """
+    @abstractmethod
+    def __init__(self, metric: Metric, limit: float, ineq: str = '<='):
+        self._metric = metric
+        self._ineq = ineq
+
+    @property
+    def metric(self) -> Metric:
+        return self._metric
+    
+    @metric.setter
+    def metric(self, value: str):
+        raise ValueError("The metric type is fixed and cannot be changed.")
+    
+    @property
+    def ineq(self) -> str:
+        return self._ineq
+    
+    @ineq.setter
+    def ineq(self, value: str):
+        raise ValueError("The inequality type of a constraint is fixed and cannot be changed.")
+
+
+class Optimizer(ExtendedABC):
     """Class representing a generic optimizer.
     
     """
     @abstractmethod
-    def __init__(self, cost_function: callable, constraints: list[callable]):
-        pass
+    def __init__(self, wfm: WindFarmModel, amb_cond: AmbientConditions, metric: Metric, constraints: list[Constraint] = None):
+        self.wfm = wfm
+        self.amb_cond = amb_cond
+        self.metric = metric
+        self.constraints = constraints
+        #: Check arguments
+        if not isinstance(wfm, WindFarmModel):
+            raise ValueError("The wind farm model should be an instance of the WindFarmModel class.")
+        if not issubclass(metric, Metric):
+            raise ValueError("The metric should be a subclass of the Metric class.")
 
     @abstractmethod
     def solve(self, model: WindFarmModel, amb_cond: AmbientConditions) -> list[float, OperationalControlSetpoints]:
@@ -273,9 +337,9 @@ class OperationalControlSetpoints():
          An array of size n_wt of power setpoints for each turbine, in % of the maximum available power. Whilst not enforced, they should be in the range [0, 1]
 
     """
-    def __init__(self):
-        self.yaw_setpoints = None
-        self.power_setpoints = None
+    def __init__(self, yaw_setpoints: npt.ArrayLike = None, power_setpoints: npt.ArrayLike = None):
+        self.yaw_setpoints = yaw_setpoints  # NOTE: `None` means greedy control, no yaw offset
+        self.power_setpoints = power_setpoints  # NOTE: `None` means greedy control, maximal power generation
         self.noise_curtailment_mode = None
         self.operational_mode = None  # NOTE: Should be in {'idling', 'power_production', 'start_up', 'shut_down'}
 
@@ -296,11 +360,24 @@ class AmbientConditions():
 
     """
     def __init__(self, wind_speeds: npt.ArrayLike, wind_directions: npt.ArrayLike, turbulence_intensities: npt.ArrayLike, data_type: str):
-        self.wind_speeds = np.asarray(wind_speeds)
-        self.wind_directions = np.asarray(wind_directions)
-        self.turbulence_intensities = np.asarray(turbulence_intensities)
+        self._amb_cond = np.column_stack((wind_speeds, wind_directions, turbulence_intensities))
         self.n_scn = wind_speeds.size
         self.data_type = data_type  # NOTE: Should be in {'time_series', 'distribution'}
+
+    def __getitem__(self, item: int) -> AmbientConditions:
+         return AmbientConditions(self.wind_speeds[item], self.wind_directions[item], self.turbulence_intensities[item], self.data_type)
+
+    @property
+    def wind_speeds(self) -> npt.ArrayLike:
+        return self._amb_cond[:, 0]
+    
+    @property
+    def wind_directions(self) -> npt.ArrayLike:
+        return self._amb_cond[:, 1]
+    
+    @property
+    def turbulence_intensities(self) -> npt.ArrayLike:
+        return self._amb_cond[:, 2]
 
     def __str__(self) -> str:
         return f"AmbientConditions(wind_speeds={self.wind_speeds}, wind_directions={self.wind_directions}, turbulence_intensities={self.turbulence_intensities}, data_type={self.data_type})"
@@ -313,14 +390,66 @@ class FLORISModel(WindFarmModel):
     """FLORIS (FLOw Redirection and Induction in Steady State) model for wind farm optimization.
 
     """
-    def __init__(self, turbine_positions: npt.ArrayLike, turbine_model: list[WindTurbineModel]):
+    def __init__(self, turbine_positions: npt.ArrayLike, turbine_model: WindTurbineModel | list[WindTurbineModel], config: dict | Path = Path('./config/floris/config_floris_farm.yaml')):
         self.layout: npt.ArrayLike = np.asarray(turbine_positions)
         self.n_wt: int = turbine_positions.shape[0]
-        self.is_homogeneous: bool = None  # NOTE: If every wind turbine is of the same type
+        self.turbine_model: list[WindTurbineModel] = turbine_model
+        if isinstance(turbine_model, WindTurbineModel):
+            self.is_homogeneous: bool = True  # NOTE: If every wind turbine is of the same type
+        else:
+            self.is_homogeneous: bool = False
+        #: Create FLORIS model object
+        self.fmodel = FlorisModel(config)
+        # FIXME: Should we use simple numpy arrays, or panda data frames, or xarray?
+        self.fmodel.set(layout_x=self.layout[:, 0], layout_y=self.layout[:, 1])
 
     def get_turbine_power(self, amb_cond: AmbientConditions, op_setpoints: OperationalControlSetpoints):
-        return np.random.rand(amb_cond.n_scn, self.n_wt)  # NOTE: Should be of size (n_scn n_wt)
+        #: Set the ambient conditions
+        self.fmodel.set(wind_directions=[wd for wd in amb_cond.wind_directions], wind_speeds=[ws for ws in amb_cond.wind_speeds], turbulence_intensities=[ti for ti in amb_cond.turbulence_intensities])
+        #: Set the control variables
+        if op_setpoints.yaw_setpoints is not None:
+            self.fmodel.set(yaw_angles=[ys for ys in op_setpoints.yaw_setpoints])
+        if op_setpoints.power_setpoints is not None:
+            self.fmodel.set_operation_model('simple-derating')
+            # FIXME: These are now based on the rated power, but should they be based on the available power? Actually, that's really hard to compute... because we don't know the available power beforehand (i.e., before running the simulation)
+            if self.is_homogeneous:
+                self.fmodel.set(power_setpoints=[op_setpoints.power_setpoints * self.turbine_model.rated_power])
+            else:
+                self.fmodel.set(power_setpoints=[op_setpoints.power_setpoints[wt_idx] * self.turbine_model[wt_idx].rated_power for wt_idx in range(self.n_wt)])
+        #: Run the model
+        self.fmodel.run()
+        #: Extract the powers
+        wt_power = self.fmodel.get_turbine_powers()
+        #: Return the result
+        return wt_power
     
+    def get_load_channels(self, amb_cond, op_setpoints):
+        raise NotImplementedError("This function is not yet implemented as the load surrogates are not available.")
+    
+    def get_noise_levels(self, amb_cond, op_setpoints, obs_loc):
+        raise NotImplementedError("This function is not yet implemented as the noise propagation model is not available.")
+    
+    def plot(self, wd: float, ws: float, ti: float, yaw_setpoints: npt.ArrayLike = None, power_setpoints: npt.ArrayLike = None, x_res: int = 100, y_res: int = 100, label: str = None, ax: Axes = None) -> Axes:
+        self.fmodel.set(wind_directions=[wd], wind_speeds=[ws], turbulence_intensities=[ti])
+        if yaw_setpoints is not None:
+            self.fmodel.set(yaw_angles=[yaw_setpoints])
+        if power_setpoints is not None:
+            raise NotImplementedError("Power setpoints are not yet implemented in the plotting function.")
+        if self.is_homogeneous:
+            height = self.turbine_model.hub_height
+        else:
+            warnings.warn("The hub height is not well-defined for heterogeneous wind farms. Using the hub height of the first turbine.")
+            height = self.turbine_model[0].hub_height
+        horizontal_plane = self.fmodel.calculate_horizontal_plane(x_resolution=x_res, y_resolution=y_res, height=height)
+        if ax is None:
+            fig, ax = plt.subplots()
+        visualize_cut_plane(horizontal_plane, ax=ax, label_contours=False, title=label)
+        #: Plot the turbine rotors
+        layoutviz.plot_turbine_rotors(self.fmodel, ax=ax)
+        layoutviz.plot_turbine_labels(self.fmodel, ax=ax, turbine_names=None)
+        #: Return the results
+        return ax
+
 
 class PyWakeModel(WindFarmModel):
     pass
@@ -375,6 +504,7 @@ class AnnualEnergyProduction(Metric):
     _is_numeric = True
     _units = "Wh/year"
 
+    # FIXME: Is this actually automatically copied (from the superclass Metric) as a @staticmethod? How does that work?
     def eval(wfm: WindFarmModel, amb_conds: list[AmbientConditions], op_conds: list[OperationalControlSetpoints]) -> float:
         #: Check whether the data is distribution of time-series based
         match amb_conds.data_type:
@@ -405,70 +535,165 @@ class AnnualWildlifeImpact(Metric):
     pass
 
 
-class GeometricYawOptimizer(Optimizer):
-    def __init__(self, wfm: WindFarmModel, metric: Metric, constraints: list[callable]):
-        self.wfm = wfm
-        self.metric = metric
-        self.constraints = constraints
+class YawOptimizerGeometric(Optimizer):
+    """Solve for the optimal yaw angle w.r.t AEP maximization (i.e., power maximization) using the FLORIS wind farm model.
+    
+    """
+    def __init__(self, wfm: WindFarmModel, amb_cond: AmbientConditions, metric: Metric = AnnualEnergyProduction, constraints: list[callable] = None):
+        super().__init__(wfm, amb_cond, metric, constraints)
         #: Check the arguments
         if wfm.__class__ is not FLORISModel:
-            raise ValueError("Only the FLORIS wind farm model is supported for geometric wake steering")
-
-    def solve(self, solver: str = 'geometric_yaw', n_iter: int = 1000, verbose: int = 0) -> list[float, OperationalControlSetpoints]:
+            raise ValueError("Only the FLORIS wind farm model is supported for geometric wake steering.")
+        if metric is not AnnualEnergyProduction:
+            raise ValueError("Only the AnnualEnergyProduction metric is supported for geometric wake steering.")
+        if constraints is not None:
+            raise ValueError("Constraints are not supported for geometric wake steering.")
+        #: Set the ambient conditions
+        # FIXME: Should we do that here or in the solve section?
+        self.wfm.fmodel.set(wind_directions=[wd for wd in self.amb_cond.wind_directions], wind_speeds=[ws for ws in self.amb_cond.wind_speeds], turbulence_intensities=[ti for ti in self.amb_cond.turbulence_intensities])
+    
+    def solve(self, solver: str = 'geometric_yaw', verbose: int = 0) -> list[float, OperationalControlSetpoints]:
         if verbose > 0:
             print(f"Starting optimization with {solver}...")
-        return None, None
+        #: Compute the optimal yaw angles
+        # FROM: https://nrel.github.io/floris/examples/examples_control_optimization/006_compare_yaw_optimizers.html  # nopep8
+        yaw_opt = YawOptimizationGeometric(self.wfm.fmodel)
+        df_opt = yaw_opt.optimize()
+        yaw_angles_opt = np.squeeze(np.vstack(df_opt.yaw_angles_opt))
+        opt_cont = OperationalControlSetpoints(yaw_setpoints=yaw_angles_opt)
+        opt_cost = AnnualEnergyProduction.eval(self.wfm, self.amb_cond, opt_cont)
+        return opt_cost, opt_cont
+    
+
+class YawOptimizerSciPy(Optimizer):
+    """Solve for the optimal yaw angle w.r.t AEP maximization (i.e., power maximization) using the FLORIS wind farm model.
+    
+    """
+    def __init__(self, wfm: WindFarmModel, amb_cond: AmbientConditions, metric: Metric = AnnualEnergyProduction, constraints: list[callable] = None):
+        super().__init__(wfm, amb_cond, metric, constraints)
+        #: Check the arguments
+        if wfm.__class__ is not FLORISModel:
+            raise ValueError("Only the FLORIS wind farm model is supported for geometric wake steering.")
+        if metric is not AnnualEnergyProduction:
+            raise ValueError("Only the AnnualEnergyProduction metric is supported for geometric wake steering.")
+        if constraints is not None:
+            raise ValueError("Constraints are not supported for geometric wake steering.")
+        #: Set the ambient conditions
+        # FIXME: Should we do that here or in the solve section?
+        self.wfm.fmodel.set(wind_directions=[wd for wd in self.amb_cond.wind_directions], wind_speeds=[ws for ws in self.amb_cond.wind_speeds], turbulence_intensities=[ti for ti in self.amb_cond.turbulence_intensities])
+    
+    def solve(self, solver: str = 'geometric_yaw', verbose: int = 0) -> list[float, OperationalControlSetpoints]:
+        if verbose > 0:
+            print(f"Starting optimization with {solver}...")
+        #: Compute the optimal yaw angles
+        # FROM: https://nrel.github.io/floris/examples/examples_control_optimization/006_compare_yaw_optimizers.html  # nopep8
+        yaw_opt = YawOptimizationScipy(self.wfm.fmodel)
+        df_opt = yaw_opt.optimize()
+        yaw_angles_opt = np.squeeze(np.vstack(df_opt.yaw_angles_opt))
+        opt_cont = OperationalControlSetpoints(yaw_setpoints=yaw_angles_opt)
+        opt_cost = AnnualEnergyProduction.eval(self.wfm, self.amb_cond, opt_cont)
+        return opt_cost, opt_cont
+
+
+class GenericSerialRefinementOptimizer(Optimizer):
+    pass
+
+
+class SerialRefinementWakeSteeringSingleAmbient(Optimizer):
+    """This is serial refinement using an arbitrary metric, but only for a single ambient condition and wake steering.
+
+    """
+    def __init__(self, wfm: WindFarmModel, amb_cond: AmbientConditions, metric: Metric = AnnualEnergyProduction, constraints: list[callable] = None):
+        super().__init__(wfm, amb_cond, metric, constraints)
+        #: Check the arguments
+        if amb_cond.n_scn != 1:
+            raise ValueError("Only a single scenario is supported for serial refinement.")
+        
+    def solve(self, verbose: int = 0) -> list[float, OperationalControlSetpoints]:
+
+        def f_obj(yaw: npt.ArrayLike) -> float:
+            return self.metric.eval(self.wfm, self.amb_cond, OperationalControlSetpoints(yaw_setpoints=np.atleast_2d(yaw)))
+
+        # FIXME: This is temporary
+        import sys
+        serial_refinement_wp4_dir = '/Users/bartwolleswink/surfdrive - Bart Wolleswinkel@surfdrive.surf.nl/TWAIN/Task 4.1 | Multi-Objective Optimisation Methodologies/Serial Refinement/WP4'
+        print(serial_refinement_wp4_dir)
+        sys.path.append(serial_refinement_wp4_dir)
+        from WP4_yaw_optimizer.yaw_optimizer_WP4 import YawOptimizer_SR
+        optimizer = YawOptimizer_SR(self.wfm.layout[:, 0], self.wfm.layout[:, 1], self.amb_cond.wind_directions[0], f_obj)
+        optimizer.optimize()
+        opt_cont = OperationalControlSetpoints(yaw_setpoints=optimizer.yaw_opt)
+        opt_cost = 0
+        return opt_cost, opt_cont
+
 
 # ====== MAIN ======
             
 
 def main():
 
-    #: Create a random number of wind conditions
+    # Set a plotting index
+    plot_idx = 2
+
+    # Create a random number of wind conditions
     wind_speeds = np.array([5, 5, 6, 12, 11])
-    wind_directions = np.array([0, 10, 350, 5, 355])  # NOTE: In degrees
+    wind_directions = np.array([0, 10, 270, 5, 90])  # NOTE: In degrees
     turbulence_intensities = np.array([0.1, 0.1, 0.2, 0.3, 0.4])  # NOTE: In %
 
-    #: Create ambient conditions
+    # Create ambient conditions
     amb_conds = AmbientConditions(wind_speeds, wind_directions, turbulence_intensities, data_type='time_series')
     print(amb_conds)
 
-    #: Create a turbine model
+    # Create a turbine model
     turbine_model = NREL5MW()
     print(turbine_model.model_name)
     # turbine_model.model_name = 'nrel5mw'  # NOTE: This should raise an error
     print(turbine_model)
 
-    #: Create a wind farm object
+    # Create a wind farm object
     layout = np.array([[608, 500], [1500, 500], [2392, 500]])
     wfm = FLORISModel(turbine_positions=layout, turbine_model=turbine_model)
 
-    #: Create operational conditions
+    # Plot the original layout
+    wfm.plot(wd=amb_conds.wind_directions[plot_idx], ws=amb_conds.wind_speeds[plot_idx], ti=amb_conds.turbulence_intensities[plot_idx], label="Greedy control")
+
+    # Create operational conditions
     op_conds = OperationalControlSetpoints()
 
-    #: Calculate AEP
+    # Calculate AEP
+    # NOTE: Here the WFM is actually modified in-place, and such the ambient conditions are maintained!
+    # aep_obj = AnnualEnergyProduction()  # NOTE: This should throw an error
     aep = AnnualEnergyProduction.eval(wfm, amb_conds, op_conds)
-    print(AnnualEnergyProduction.is_coupled)
-    print(AnnualEnergyProduction.is_numeric)
-    print(AnnualEnergyProduction.units)
+    # Test if @staticmethod is actually inherited correctly
+    import inspect
+    # FIXME: This inheritance does not seem to work correctly...
+    print(f"Is the method 'eval' a static method? {isinstance(inspect.getattr_static(AnnualEnergyProduction, 'eval'), staticmethod)}")
     print(f"AEP: {aep} Wh/year")
 
-    #: Construct an optimization function
-    def cost_function(wfm: WindFarmModel, amb_conds: AmbientConditions, op_conds: OperationalControlSetpoints) -> float:
-        return -AnnualEnergyProduction.eval(wfm, amb_conds, op_conds)
+    # Create a constraint
+    cons_1 = Constraint(AnnualEnergyProduction, limit=30.0, ineq='<=')
+    print(cons_1.ineq)
+    print(cons_1.metric.name)
     
-    def constraint1(wfm: WindFarmModel, amb_conds: AmbientConditions, op_conds: OperationalControlSetpoints) -> bool:
-        return 0.0 <= 30
-    
-    def constraint2(wfm: WindFarmModel, amb_conds: AmbientConditions, op_conds: OperationalControlSetpoints) -> bool:
-        return 0.0 <= 1.0
-    
-    opt_prob = GeometricYawOptimizer(wfm, AnnualEnergyProduction, constraints=[constraint1, constraint2])
-    opt_cost, opt_control_variables = opt_prob.solve(verbose=1)
+    opt_prob_gws = YawOptimizerGeometric(wfm, amb_conds, AnnualEnergyProduction)
+    opt_cost_gws, opt_control_variables_gws = opt_prob_gws.solve(verbose=1)
 
-    #: Print the results
-    print(f"Optimal Cost: {opt_cost}")
-    print(f"Optimal Control Variables: {opt_control_variables}")
+    opt_prob_spws = YawOptimizerSciPy(wfm, amb_conds, AnnualEnergyProduction)
+    opt_cost_spws, opt_control_variables_spws = opt_prob_spws.solve(verbose=1)
+
+    opt_prob_sr = SerialRefinementWakeSteeringSingleAmbient(wfm, amb_conds[plot_idx], AnnualEnergyProduction, constraints=[cons_1])
+    opt_cost_sr, opt_control_variables_sr = opt_prob_sr.solve(verbose=1)
+
+    # Print the results
+    print(f"Optimal Cost: {opt_cost_gws / 3600 * 1E-9:.2f} (in GWh)")
+    print(f"Optimal Control Variables (geometric wake steering):\n{opt_control_variables_gws.yaw_setpoints}")
+    print(f"Optimal Control Variables (SciPy wake steering):\n{opt_control_variables_spws.yaw_setpoints}")
+
+    # Plot the results
+    wfm.plot(wd=amb_conds.wind_directions[plot_idx], ws=amb_conds.wind_speeds[plot_idx], ti=amb_conds.turbulence_intensities[plot_idx], yaw_setpoints=opt_control_variables_gws.yaw_setpoints[plot_idx, :], label="Optimal Yaw Angles Using Geometric Wake Steering")
+    
+    # Show plots
+    plt.show()
 
 
 if __name__ == "__main__":
