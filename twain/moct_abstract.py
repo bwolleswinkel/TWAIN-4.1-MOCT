@@ -123,6 +123,7 @@ class WindTurbineModel(ABC):
     # FIXME: Actually, this should also be just classbased methods and properties... Just like Metrics
     
     """
+
     @abstractmethod
     def __init__(self):
         pass
