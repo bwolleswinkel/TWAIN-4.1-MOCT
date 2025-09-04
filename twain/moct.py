@@ -12,7 +12,11 @@ import numpy.typing as npt
 from tqdm import tqdm
 from floris import FlorisModel, WindRose as FlorisWindRose
 from floris.optimization.layout_optimization.layout_optimization_scipy import LayoutOptimizationScipy
+from floris.optimization.yaw_optimization.yaw_optimizer_sr import YawOptimizationSR
 from floris.optimization.yaw_optimization.yaw_optimizer_geometric import YawOptimizationGeometric
+
+# TODO: Remove this dependency
+import twain.utils as utils
 
 # ------ TYPE ALIASES ------
 
@@ -40,7 +44,11 @@ class Scenario:
         self.wt_names = wt_names if wt_names is not None else [f'{i:03}' for i in range(self.n_wt)]
         self.wind_rose = None
         if perimeter is None and wf_layout is not None:
-            convex_hull_indices = sp.spatial.ConvexHull(wf_layout).vertices
+            # TODO: This is not a rigorous implementation
+            try:
+                convex_hull_indices = sp.spatial.ConvexHull(wf_layout).vertices
+            except sp.spatial.qhull.QhullError:  # Wind turbines are (probably) along a line
+                convex_hull_indices = np.array([np.argmax(wf_layout[:, 0]), np.argmin(wf_layout[:, 0])])
             self.perimeter = np.column_stack([wf_layout[convex_hull_indices, 0], wf_layout[convex_hull_indices, 1]])
         else:
             self.perimeter = perimeter
@@ -81,6 +89,8 @@ class WindRose(FlorisWindRose):
     def from_ts(cls, wind_direction: NPArray[float], wind_speed: NPArray[float], n_bins_wd: int = None, n_bins_ws: int = None) -> WindRose:
         #: Compute a histogram
         hist, _, _ = np.histogram2d(wind_speed, wind_direction, bins=[n_bins_ws, n_bins_wd], range=[[0, 25], [0, 360]])
+        # FIXME: For some reason, we need to flip this up/down
+        hist = np.flipud(hist)
         #: Normalize the histogram
         hist = hist / np.sum(hist)
         #: Create a DataFrame
@@ -93,6 +103,42 @@ class WindRose(FlorisWindRose):
     
     def __str__(self) -> str:
         return f"<class: {self.__class__.__name__}> | Wind rose object with {self.n_bins_wd} direction bins and {self.n_bins_ws} wind speed bins\n" + f"{self.wind_rose.__str__()}"
+    
+    def resample(self, N_bins_wd: int = None, N_bins_ws: int = None, mode: str = 'resample', in_place: bool = True):
+        """ Function to resample the wind rose data.
+        
+        """
+        #: Check if resampling is needed
+        if N_bins_wd is None and N_bins_ws is None:
+            pass
+        #: Check the mode
+        match mode:
+            case 'resample':
+                #: Check that resampling factors are integers
+                resampling_factor_wd, resampling_factor_ws = np.floor_divide(self.n_bins_wd, N_bins_wd), np.floor_divide(self.n_bins_ws, N_bins_ws)
+                #: Resample the data
+                # FIXME: This is by no means robust or efficient, and very sensitive
+                data = np.zeros((N_bins_ws, N_bins_wd))
+                for idx in np.ndindex(data.shape):
+                    data[idx] = np.sum(self.data[idx[0] * resampling_factor_ws:(idx[0] + 1) * resampling_factor_ws, idx[1] * resampling_factor_wd:(idx[1] + 1) * resampling_factor_wd])
+                wd, ws = np.meshgrid(np.linspace(0, 360, N_bins_wd), np.linspace(0, 25, N_bins_ws), indexing='xy')
+                if in_place:
+                    self.wind_rose = pd.DataFrame(np.column_stack((wd.flatten(order='F'), ws.flatten(order='F')[::-1], data.flatten(order='F'))), columns=['wind_dir', 'wind_speed', 'prevalence'])
+                    self.data = data
+                    self.n_bins_wd = N_bins_wd
+                    self.n_bins_ws = N_bins_ws
+                else:
+                    # FIXME: This class is really broken, initialization is not as it should be...
+                    wind_rose = WindRose(pd.DataFrame(np.column_stack((wd.flatten(order='F'), ws.flatten(order='F'), data.flatten(order='F'))), columns=['wind_dir', 'wind_speed', 'prevalence']))
+                    self.wind_rose = pd.DataFrame(np.column_stack((wd.flatten(order='F'), ws.flatten(order='F')[::-1], data.flatten(order='F'))), columns=['wind_dir', 'wind_speed', 'prevalence'])
+                    wind_rose.data = data
+                    wind_rose.n_bins_wd = N_bins_wd
+                    wind_rose.n_bins_ws = N_bins_ws
+                    return wind_rose
+            case 'interpolate':
+                raise NotImplementedError("Interpolation not yet implemented")
+            case _:
+                raise ValueError(f"Unrecognized resampling mode '{mode}'")
 
 
 class OptProblem:
@@ -187,13 +233,21 @@ class WindFarmModel:
                 #: Construct the wind farm model from a template
                 fmodel = FlorisModel('./config/floris/config_floris_farm.yaml')
                 fmodel.set(layout_x=self.scenario.wf_layout['x'], layout_y=self.scenario.wf_layout['y'])
-                fmodel.set(turbulence_intensities=[self.scenario.TI], wind_directions=[self.scenario.theta], wind_speeds=[self.scenario.U_inf])
+                # FIXME: This must be made robust, whether we give a single scenario or whether we give multiple scenarios
+                if not isinstance(self.scenario.U_inf, float):
+                    fmodel.set(turbulence_intensities=[TI for TI in self.scenario.TI], wind_directions=[theta for theta in self.scenario.theta], wind_speeds=[U_inf for U_inf in self.scenario.U_inf])
+                else:
+                    fmodel.set(turbulence_intensities=[self.scenario.TI], wind_directions=[self.scenario.theta], wind_speeds=[self.scenario.U_inf])
                 # FIXME: This gives a persistent warning 'floris.floris_model.FlorisModel WARNING turbine_type has been changed without specifying a new reference_wind_height. reference_wind_height remains 90.00 m. Consider calling `FlorisModel.assign_hub_height_to_ref_height` to update the reference wind height to the turbine hub height.'
                 # fmodel.set_wt_yaw(turbine_type=self.scenario.wt_model)
                 if self.scenario.wind_rose is not None:
                     fmodel.set(wind_data=self.scenario.wind_rose)
                 #: Set the control variables
-                fmodel.set(yaw_angles=[control_setpoints.yaw_angles])
+                # FIXME: Make this robust for multiple ambient conditions
+                if not isinstance(self.scenario.U_inf, float):
+                    fmodel.set(yaw_angles=control_setpoints.yaw_angles.T)
+                else:
+                    fmodel.set(yaw_angles=[control_setpoints.yaw_angles] if control_setpoints.yaw_angles.size == self.scenario.n_wt else [yaw_angles for yaw_angles in control_setpoints.yaw_angles])
                 if control_setpoints.power_setpoints is True:
                     fmodel.set_operation_model("simple-derating")
                     fmodel.set(power_setpoints=[control_setpoints.power_setpoints])
@@ -224,12 +278,16 @@ class WindFarmModel:
         #: Convert the wind-farm layout to a numpy array
         wf_array_layout = self.scenario.wf_layout.to_numpy()
         #: Compute the noise field
-        for wt in wf_array_layout:
-            #: Compute the distribution
-            Z += placeholder_oscilation_decay_2d(X, Y, wt, self.scenario.U_inf, self.scenario.theta)
-        wf_noise = Z
-        #: Cap the noise
-        wf_noise = 4 * np.clip(wf_noise + 12, 0, Z.max())
+        # FIXME: This must be made robust such that this can handle multiple ambient conditions by default
+        if not isinstance(self.scenario.U_inf, float):
+            wf_noise = None
+        else:
+            for wt in wf_array_layout:
+                #: Compute the distribution
+                Z += placeholder_oscilation_decay_2d(X, Y, wt, self.scenario.U_inf, self.scenario.theta)
+            wf_noise = Z
+            #: Cap the noise
+            wf_noise = 4 * np.clip(wf_noise + 12, 0, Z.max())
         #: Return the results
         return wt_power, wt_load, (X, Y, wf_noise)
     
@@ -245,12 +303,8 @@ class WindFarmModel:
                 #: Set the control variables
                 fmodel.set(yaw_angles=[control_setpoints.yaw_angles])
                 if control_setpoints.power_setpoints is not None:
-                    # TEMP
-                    #
-                    print(f"Power setpoints: {control_setpoints.power_setpoints}")
-                    #
                     fmodel.set_operation_model("simple-derating")
-                    fmodel.set(power_setpoints=[control_setpoints.power_setpoints * 1E7])
+                    fmodel.set(power_setpoints=[control_setpoints.power_setpoints])
                 #: Run the model
                 fmodel.run()
                 #: Extract the flow field
@@ -283,31 +337,237 @@ class LoadSurrogateModel:
 
 
 class Metrics:
-    """
-    Class which stores the metrics.
+    """Class which stores the metrics.
+
     """
     def __init__(self) -> None:
         pass
 
-    def compute_aep(self, wt_power: NPArray[float]) -> float:
-        """
-        Function to compute the annual energy production.
+    def compute_aep(self, wt_power: NPArray[float], params: dict = None) -> float:
+        """Function to compute the annual energy production.
+
         """
         #: Compute the annual power production
-        aep = np.sum(wt_power) * 31_536_000
+        if params is not None:
+            prevalence = params['prevalence']
+            # NOTE: This assumes the array wt_power is of size (N_bins_wd, N_bins_ws, n_wt)
+            aep = np.nansum(np.nansum(wt_power, axis=2) * (prevalence / 100)) * 31_536_000
+        else:
+            aep = np.sum(np.sum(wt_power, axis=1) * (31_536_000 / wt_power.shape[0])) 
         #: Return the result
         return aep
     
     def compute_lcoe(self, scenario: Scenario, wt_power: NPArray[float]) -> float:
-        """
-        Function to compute the levelized cost of energy. This also takes into account loads.
+        """Function to compute the levelized cost of energy. This also takes into account loads.
+
         """
         #: Compute the annual energy production
         aep = self.compute_aep(wt_power)
-        #: Compute the levelized cost of energy
+        #: Compute the levelized cost of electricity
         lcoe = 1.0 * aep
         #: Return the result
         return lcoe
+    
+    # ------ PLACEHOLDER FUNCTIONS ------
+
+    def calc_aep(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, downtime: str = None, params = None) -> float:
+        """Calculate the annual energy production (AEP) based on the wind farm layout and wind conditions. The AEP is calculated by summing the power production of each wind turbine over all scenarios, and multiplying this generated power by the time duration for each scenario. The AEP is expressed in kWh/year.
+        
+        Parameters
+        ----------
+        ambient_cond : np.ndarray
+            Ambient conditions, i.e., a N_scn x 3 array of wind speed, wind direction, and turbulence intensity for each scenario. Note that N_scn is the number of scenarios.
+        theta : list
+            Decision variable consisting of θ = [γ, η], where γ is a N_scn x N_wt array of yaw angles (in deg) and η is a N_scn x N_wr array of power setpoints (in -). Note that N_wt are the number of wind turbines, and N_scn are the number of scenarios. A scenario is a triple of ambent conditions (wind_speed, wind_direction, turbulence_intensity).
+        data_type : str
+            Type of data to be used for the calculation. This can be 'distribution' or 'time_series'.
+        downtime : str
+            Type of downtime to be used for the calculation. By default, the turbines are assumed to be operational for the entire year.
+        params : dict
+            Dictionary containing additional params. In the case of distributional data, params should contain the key 'prevalence', which is (flattened) N_scn vector of the prevalence of each scenario. In the parameter `downtime = dist`, then params should contain the key 'downtime', which is a N_scn vector of the downtime for each scenario (a number between 0 and 1 indicating the percentage of downtime in that scenario. Note that if time series data is provided, then, logically, downtime should be `0` or `1` for each entry).
+
+        """
+        #: Check if the data is distributional or time series
+        match data_type:
+            case 'distribution':
+                #: Extract the prevalence from the params
+                prevalence = params['prevalence']
+                #: Calculate the power
+                power = self.wfm.power(ambient_cond, theta) 
+                #: Calculate the AEP
+                aep = np.sum(prevalence * (np.sum(power, axis=1) * 31_536_000))
+            case 'time_series':
+                #: Extract the number of scenarios
+                N_scn = ambient_cond.shape[0]
+                #: Calculate the power
+                power = self.wfm.power(ambient_cond, theta) 
+                #: Calculate the AEP
+                aep = np.sum(np.sum(power, axis=1) * (31_536_000 / N_scn))
+            case _:
+                raise ValueError(f"Unrecognized data type '{data_type}' for AEP calculation")
+        return aep
+
+    def calc_ar(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, data_elec, downtime: str = None, params = None) -> float:
+        """Calculate the annual revenue (AR) based on the wind farm layout and wind conditions. The AR is calculated by multiplying the power production for each scenario (i.e., set of ambient conditions) with an electricity price. The AR is expressed in €/year or $/year.
+        
+        Parameters
+        ----------
+        ambient_cond : np.ndarray
+            Ambient conditions, i.e., a N_scn x 3 array of wind speed, wind direction, and turbulence intensity for each scenario. Note that N_scn is the number of scenarios.
+        theta : list
+            Decision variable consisting of θ = [γ, η], where γ is a N_scn x N_wt array of yaw angles (in deg) and η is a N_scn x N_wr array of power setpoints (in -). Note that N_wt are the number of wind turbines, and N_scn are the number of scenarios. A scenario is a triple of ambient conditions (wind_speed, wind_direction, turbulence_intensity).
+        data_type : str
+            Type of data to be used for the calculation. This can be 'distribution' or 'time_series'.
+        data_elec : str
+            Type of electricity price data to be used for the ARP calculation. This can be a fixed value (e.g., 0.05 for 5 cents/kWh), or a time series of electricity prices, of a distribution of electricity prices based on the ambient conditions.
+        downtime : str
+            Type of downtime to be used for the calculation. By default, the turbines are assumed to be operational for the entire year.
+        data : dict
+            Dictionary containing additional data. In the case of distributional data, data should contain the key 'prevalence', which is (flattened) N_scn vector of the prevalence of each scenario. In the parameter `downtime = dist`, then data should contain the key 'downtime', which is a N_scn vector of the downtime for each scenario (a number between 0 and 1 indicating the percentage of downtime in that scenario. Note that if time series data is provided, then, logically, downtime should be `0` or `1` for each entry).
+
+        """
+        raise NotImplementedError("Annual revenue calculation not yet implemented")
+
+    def calc_ap(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, data_elec, model_oem, downtime: str = None, params = None) -> float:
+        """Calculate the annual profit (AR) based on the wind farm layout and wind conditions. The ARP is calculated by multiplying the power production for each scenario (i.e., set of ambient conditions) with an electricity price, and subtracting the of operation and maintenance (O&M or OPEX) costs (the likelihood/height of which can be influenced, i.e., decreased of increased, by different control strategies), and the costs of wind farm control itself (CAPEX, fixed cost per year in terms of a subscription model). The CAPEX is assumed to be a fixed value. The AP is expressed in €/year or $/year.
+        
+        Parameters
+        ----------
+        ambient_cond : np.ndarray
+            Ambient conditions, i.e., a N_scn x 3 array of wind speed, wind direction, and turbulence intensity for each scenario. Note that N_scn is the number of scenarios.
+        theta : list
+            Decision variable consisting of θ = [γ, η], where γ is a N_scn x N_wt array of yaw angles (in deg) and η is a N_scn x N_wr array of power setpoints (in -). Note that N_wt are the number of wind turbines, and N_scn are the number of scenarios. A scenario is a triple of ambient conditions (wind_speed, wind_direction, turbulence_intensity).
+        data_type : str
+            Type of data to be used for the calculation. This can be 'distribution' or 'time_series'.
+        data_elec : str
+            Type of electricity price data to be used for the ARP calculation. This can be a fixed value (e.g., 0.05 for 5 cents/kWh), or a time series of electricity prices, of a distribution of electricity prices based on the ambient conditions.
+        model_oem : callable
+            Callable function which computes the O&M costs based on the ambient conditions and the control setpoints. This can be a simple function which returns a fixed value, or a more complex function which computes the O&M costs based on the ambient conditions and the control setpoints. The function should be called as model_oem(ambient_cond, theta). The callable function itself could/should be constructed as model_oem = get_oem_model(alpha), where alpha are parameters which tune the model. Alternatively, the model might require data itself.
+        downtime : str
+            Type of downtime to be used for the calculation. By default, the turbines are assumed to be operational for the entire year.
+        data : dict
+            Dictionary containing additional data. In the case of distributional data, data should contain the key 'prevalence', which is (flattened) N_scn vector of the prevalence of each scenario. In the parameter `downtime = dist`, then data should contain the key 'downtime', which is a N_scn vector of the downtime for each scenario (a number between 0 and 1 indicating the percentage of downtime in that scenario. Note that if time series data is provided, then, logically, downtime should be `0` or `1` for each entry).
+
+        """
+        raise NotImplementedError("Annual profit calculation not yet implemented")
+
+    def calc_lifetime(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, downtime: str = None, params = None) -> float:
+        """Calculate the lifetime of the wind farm based on the wind farm layout and wind conditions. The lifetime is calculated by taking into account the control actions over all different N_scn, and is calculated based on fatigue, which itself depends on the loads (which are a function of the operational control actions). The lifetime is expressed in years.
+        
+        Parameters
+        ----------
+        ambient_cond : np.ndarray
+            Ambient conditions, i.e., a N_scn x 3 array of wind speed, wind direction, and turbulence intensity for each scenario. Note that N_scn is the number of scenarios.
+        theta : list
+            Decision variable consisting of θ = [γ, η], where γ is a N_scn x N_wt array of yaw angles (in deg) and η is a N_scn x N_wr array of power setpoints (in -). Note that N_wt are the number of wind turbines, and N_scn are the number of scenarios. A scenario is a triple of ambient conditions (wind_speed, wind_direction, turbulence_intensity).
+        data_type : str
+            Type of data to be used for the calculation. This can be 'distribution' or 'time_series'.
+        downtime : str
+            Type of downtime to be used for the calculation. By default, the turbines are assumed to be operational for the entire year.
+        params : dict
+            Dictionary containing additional params. In the case of distributional data, params should contain the key 'prevalence', which is (flattened) N_scn vector of the prevalence of each scenario. In the parameter `downtime = dist`, then params should contain the key 'downtime', which is a N_scn vector of the downtime for each scenario (a number between 0 and 1 indicating the percentage of downtime in that scenario. Note that if time series data is provided, then, logically, downtime should be `0` or `1` for each entry).
+
+        """
+        raise NotImplementedError("Lifetime calculation not yet implemented")
+    
+    def calc_lep(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, downtime: str = None, params = None) -> float:
+        """Calculate the liftime energy production (LEP) based on the wind farm layout and wind conditions. The LEP is calculated by multiplying annual energy production by the lifetime of the wind farm. The LEP is expressed in kWh.
+        
+        Parameters
+        ----------
+        ambient_cond : np.ndarray
+            Ambient conditions, i.e., a N_scn x 3 array of wind speed, wind direction, and turbulence intensity for each scenario. Note that N_scn is the number of scenarios.
+        theta : list
+            Decision variable consisting of θ = [γ, η], where γ is a N_scn x N_wt array of yaw angles (in deg) and η is a N_scn x N_wr array of power setpoints (in -). Note that N_wt are the number of wind turbines, and N_scn are the number of scenarios. A scenario is a triple of ambient conditions (wind_speed, wind_direction, turbulence_intensity).
+        data_type : str
+            Type of data to be used for the calculation. This can be 'distribution' or 'time_series'.
+        downtime : str
+            Type of downtime to be used for the calculation. By default, the turbines are assumed to be operational for the entire year.
+        params : dict
+            Dictionary containing additional params. In the case of distributional data, params should contain the key 'prevalence', which is (flattened) N_scn vector of the prevalence of each scenario. In the parameter `downtime = dist`, then params should contain the key 'downtime', which is a N_scn vector of the downtime for each scenario (a number between 0 and 1 indicating the percentage of downtime in that scenario. Note that if time series data is provided, then, logically, downtime should be `0` or `1` for each entry).
+
+        """
+        raise NotImplementedError("Levelized energy production calculation not yet implemented")
+    
+    def calc_lr(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, downtime: str = None, params = None) -> float:
+        """Calculate the lifetime revenue (LR) based on the wind farm layout and wind conditions. The LR is calculated by multiplying the annual revenue by the lifetime of the wind farm. The LR is expressed in € or $.
+        
+        Parameters
+        ----------
+        ambient_cond : np.ndarray
+            Ambient conditions, i.e., a N_scn x 3 array of wind speed, wind direction, and turbulence intensity for each scenario. Note that N_scn is the number of scenarios.
+        theta : list
+            Decision variable consisting of θ = [γ, η], where γ is a N_scn x N_wt array of yaw angles (in deg) and η is a N_scn x N_wr array of power setpoints (in -). Note that N_wt are the number of wind turbines, and N_scn are the number of scenarios. A scenario is a triple of ambient conditions (wind_speed, wind_direction, turbulence_intensity).
+        data_type : str
+            Type of data to be used for the calculation. This can be 'distribution' or 'time_series'.
+        downtime : str
+            Type of downtime to be used for the calculation. By default, the turbines are assumed to be operational for the entire year.
+        params : dict
+            Dictionary containing additional params. In the case of distributional data, params should contain the key 'prevalence', which is (flattened) N_scn vector of the prevalence of each scenario. In the parameter `downtime = dist`, then params should contain the key 'downtime', which is a N_scn vector of the downtime for each scenario (a number between 0 and 1 indicating the percentage of downtime in that scenario. Note that if time series data is provided, then, logically, downtime should be `0` or `1` for each entry).
+
+        """
+        return self.calc_ar(ambient_cond, theta, data_type, downtime, params) * self.calc_lifetime(ambient_cond, theta, data_type, downtime, params)
+    
+    def calc_lp(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, data_elec, downtime: str = None, params = None) -> float:
+        """Calculate the limetime profit (LP) based on the wind farm layout and wind conditions. The LP is calculated by multiplying the annual profit by the lifetime of the wind farm. The LP is expressed in € or $.
+        
+        Parameters
+        ----------
+        ambient_cond : np.ndarray
+            Ambient conditions, i.e., a N_scn x 3 array of wind speed, wind direction, and turbulence intensity for each scenario. Note that N_scn is the number of scenarios.
+        theta : list
+            Decision variable consisting of θ = [γ, η], where γ is a N_scn x N_wt array of yaw angles (in deg) and η is a N_scn x N_wr array of power setpoints (in -). Note that N_wt are the number of wind turbines, and N_scn are the number of scenarios. A scenario is a triple of ambient conditions (wind_speed, wind_direction, turbulence_intensity).
+        data_type : str
+            Type of data to be used for the calculation. This can be 'distribution' or 'time_series'.
+        data_elec : str
+            Type of electricity price data to be used for the LP calculation. This can be a fixed value (e.g., 0.05 for 5 cents/kWh), or a time series of electricity prices, of a distribution of electricity prices based on the ambient conditions.
+        downtime : str
+            Type of downtime to be used for the calculation. By default, the turbines are assumed to be operational for the entire year.
+        data : dict
+            Dictionary containing additional data. In the case of distributional data, data should contain the key 'prevalence', which is (flattened) N_scn vector of the prevalence of each scenario. In the parameter `downtime = dist`, then data should contain the key 'downtime', which is a N_scn vector of the downtime for each scenario (a number between 0 and 1 indicating the percentage of downtime in that scenario. Note that if time series data is provided, then, logically, downtime should be `0` or `1` for each entry).
+
+        """
+        return self.calc_ap(ambient_cond, theta, data_type, downtime, params) * self.calc_lifetime(ambient_cond, theta, data_type, data_elec, downtime, params)
+    
+    def calc_aanp(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, noise_area: SpatialArray | list[np.ndarray], params = None) -> float:
+        """Calculate the average anual noise production (AANP) based on the wind farm layout and wind conditions. The AANP is calculcated by producing the noise field based on the wind farm layout and the ambient conditions, and then averaging the noise field over the area of interest (i.e., the `noise area`). The anual average is then calculated by means of summing these averages. The AANP is expressed in dB.
+        
+        Parameters
+        ----------
+        ambient_cond : np.ndarray
+            Ambient conditions, i.e., a N_scn x 3 array of wind speed, wind direction, and turbulence intensity for each scenario. Note that N_scn is the number of scenarios.
+        theta : list
+            Decision variable consisting of θ = [γ, η], where γ is a N_scn x N_wt array of yaw angles (in deg) and η is a N_scn x N_wr array of power setpoints (in -). Note that N_wt are the number of wind turbines, and N_scn are the number of scenarios. A scenario is a triple of ambient conditions (wind_speed, wind_direction, turbulence_intensity).
+        data_type : str
+            Type of data to be used for the calculation. This can be 'distribution' or 'time_series'.
+        noise_area : SpatialArray | list[np.ndarray]
+            Spatial array which contains the noise area of interest, i.e., either a SpatialArray with the noise mask (e.g, a residential area), or a list of coordinates of measurement points (e.g., noise measurement).
+        params : dict
+            Dictionary containing additional params. In the case of distributional data, params should contain the key 'prevalence', which is (flattened) N_scn vector of the prevalence of each scenario. In the parameter `downtime = dist`, then params should contain the key 'downtime', which is a N_scn vector of the downtime for each scenario (a number between 0 and 1 indicating the percentage of downtime in that scenario. Note that if time series data is provided, then, logically, downtime should be `0` or `1` for each entry).
+
+        """
+        raise NotImplementedError("Average annual noise production not yet implemented")
+    
+    def calc_aaa(self, ambient_cond: np.ndarray, theta: list[np.ndarray, np.ndarray], data_type: str, noise_area: SpatialArray | list[npt.ArrayLike], weighting: callable | np.ndarray, params = None) -> float:
+        """Calculate the average annual annoyance (AAA) based on the wind farm layout, operational control setpoints, and wind conditions. The average annual annoyance is calculated by weighting the noise production with the annoyance factor for each scenario, and then averaging this over all scenarios. The annoyance factor is a function of the noise level, and can be based on a distribution or a time series. The AAA is expressed in a dimensionless number, ranging from 0 to a 100.
+        
+        Parameters
+        ----------
+        ambient_cond : np.ndarray
+            Ambient conditions, i.e., a N_scn x 3 array of wind speed, wind direction, and turbulence intensity for each scenario. Note that N_scn is the number of scenarios.
+        theta : list
+            Decision variable consisting of θ = [γ, η], where γ is a N_scn x N_wt array of yaw angles (in deg) and η is a N_scn x N_wr array of power setpoints (in -). Note that N_wt are the number of wind turbines, and N_scn are the number of scenarios. A scenario is a triple of ambient conditions (wind_speed, wind_direction, turbulence_intensity).
+        data_type : str
+            Type of data to be used for the calculation. This can be 'distribution' or 'time_series'.
+        noise_area : SpatialArray | list[np.ndarray]
+            Spatial array which contains the noise area of interest, i.e., either a SpatialArray with the noise mask (e.g, a residential area), or a list of coordinates of measurement points (e.g., noise measurement).
+        weighting: Callable | np.ndarray
+            Weighting function or array which computes the annoyance factor based on the noise level. This can be a callable function which takes the noise level as input and returns the annoyance factor, or a numpy array which weights the noise level based on a predefined annoyance factor.
+        params : dict
+            Dictionary containing additional params. In the case of distributional data, params should contain the key 'prevalence', which is (flattened) N_scn vector of the prevalence of each scenario. In the parameter `downtime = dist`, then params should contain the key 'downtime', which is a N_scn vector of the downtime for each scenario (a number between 0 and 1 indicating the percentage of downtime in that scenario. Note that if time series data is provided, then, logically, downtime should be `0` or `1` for each entry).
+
+        """
+        raise NotImplementedError("Average annual annoyance calculation not yet implemented")
     
 
 class SpatialArray:
@@ -315,6 +575,7 @@ class SpatialArray:
 
     # TODO: Subclass a numpy array, and implement the __getitem__ method to allow for slicing
     # FROM: https://numpy.org/doc/stable/user/basics.subclassing.html
+    
     """
     
     def __init__(self, spatial: list[NPArray[float], ...], data: NPArray[float]) -> SpatialArray:
@@ -456,14 +717,31 @@ def optimal_wake_steering(problem: OptProblem, N_iter: int = 100, N_swarm: int =
             # TODO: Move this to the class WindFarmModel
             fmodel = FlorisModel('./config/floris/config_floris_farm.yaml')
             fmodel.set(layout_x=problem.scenario.wf_layout['x'], layout_y=problem.scenario.wf_layout['y'])
-            fmodel.set(turbulence_intensities=[problem.scenario.TI], wind_directions=[problem.scenario.theta], wind_speeds=[problem.scenario.U_inf])
+            # TODO: Move the methodology 'ensure_list' to the class WindFarmModel itself
+            fmodel.set(turbulence_intensities=utils.ensure_list(problem.scenario.TI), wind_directions=utils.ensure_list(problem.scenario.theta), wind_speeds=utils.ensure_list(problem.scenario.U_inf))
             #: Compute the optimal yaw angles
             # FROM: https://nrel.github.io/floris/examples/examples_control_optimization/006_compare_yaw_optimizers.html  # nopep8
             yaw_opt_geo = YawOptimizationGeometric(fmodel)
             df_opt_geo = yaw_opt_geo.optimize()
-            yaw_angles_opt_geo = np.vstack(df_opt_geo.yaw_angles_opt).flatten()
+            # FIXME: I don't know what the correct shape should be here...
+            yaw_angles_opt_geo = np.squeeze(np.vstack(df_opt_geo.yaw_angles_opt).T)
             #: Create the operating setpoints
             control_setpoints = ControlSetpoints(yaw_angles=yaw_angles_opt_geo, power_setpoints=np.ones(problem.scenario.n_wt))
+        case 'serial-refine':
+            #: Create a surrogate wind farm and metrics model
+            # TODO: Move this to the class WindFarmModel
+            fmodel = FlorisModel('./config/floris/config_floris_farm.yaml')
+            fmodel.set(layout_x=problem.scenario.wf_layout['x'], layout_y=problem.scenario.wf_layout['y'])
+            # TODO: Move the methodology 'ensure_list' to the class WindFarmModel itself
+            fmodel.set(turbulence_intensities=utils.ensure_list(problem.scenario.TI), wind_directions=utils.ensure_list(problem.scenario.theta), wind_speeds=utils.ensure_list(problem.scenario.U_inf))
+            #: Compute the optimal yaw angles
+            # FROM: https://nrel.github.io/floris/examples/examples_control_optimization/006_compare_yaw_optimizers.html  # nopep8
+            yaw_opt_sr = YawOptimizationSR(fmodel)
+            df_opt_sr = yaw_opt_sr.optimize()
+            # FIXME: I don't know what the correct shape should be here...
+            yaw_angles_opt_sr = np.squeeze(np.vstack(df_opt_sr.yaw_angles_opt).T)
+            #: Create the operating setpoints
+            control_setpoints = ControlSetpoints(yaw_angles=yaw_angles_opt_sr, power_setpoints=np.ones(problem.scenario.n_wt))
         case _:
             raise ValueError(f"Unrecognized optimization method '{problem.opt_method}'")
     # TEMP: plot iterations of PSO
@@ -527,8 +805,18 @@ def optimal_power_lines(problem: OptProblem, groups: list) -> list:
     return vertices_power_lines
 
 
-def ti_from_ws(TI: float) -> float:
-    pass
+def ti_from_ws(ws: float | NPArray[float], place: str = 'offshore') -> float | NPArray[float]:
+    # FROM: "Current issues in wind energy meteorology," Emeis (2014)
+    #: Match the place
+    match place:
+        case 'onshore':
+            TI = np.clip(0.8 / np.clip(ws, 0.1, None) + 0.1, 0, 0.5)
+        case 'offshore':
+            TI = np.clip(0.4 / np.clip(ws, 0.1, None) - 0.07 + 0.07 * np.sqrt(0.1 * ws), 0, 0.2)
+        case _:
+            raise ValueError(f"Unrecognized place '{place}'")
+    #: Return the result
+    return TI
 
 
 # ------ PLACEHOLDERS ------

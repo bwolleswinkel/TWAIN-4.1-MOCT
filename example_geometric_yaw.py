@@ -10,23 +10,17 @@ import pandas as pd
 from yaml import safe_load
 import matplotlib.pyplot as plt
 
-from twain import moct, plot
+from twain import moct, plot, utils
 from twain.moct import WindFarmModel
 
 # ------------ PARAMETERS ------------
 
 # Select the wind-farm layout
-layout = 'data/la_haute_borne/wf_layout.csv'
-
-# Select the building plan
-buildings = 'data/la_haute_borne/buildings.npy'
-
-# Set a new datum
-datum = [621400, 6181000]
+layout = 'data/schkortleben/wf_layout.csv'
 
 # Select the scenario parameters
-U_inf = 12.0  # Mean wind speed, in m/s
-theta = 330  # Wind direction, in degrees
+U_inf = 8.0  # Mean wind speed, in m/s
+theta = 190  # Wind direction, in degrees
 turb_intensity = 0.06  # Turbulence intensity
 
 # ------------ SCRIPT ------------
@@ -46,13 +40,14 @@ match path_layout.suffix:
         raise ValueError(f"Unrecognized file format '{path_layout.suffix}")
     
 # Convert to numpy array
-array_layout = df_layout[['x', 'y']].to_numpy() - datum
+array_layout = df_layout[['x', 'y']].to_numpy()
+
+# Get a datum
+datum = utils.find_datum(array_layout)
+array_layout -= datum
 
 # Create the scenario
 scenario = moct.Scenario(wf_layout=array_layout, U_inf=U_inf, theta=theta, TI=turb_intensity, wt_names=df_layout['name'])
-
-# TEMP
-print(scenario)
 
 # Create a wind farm model
 wf_model = WindFarmModel(scenario)
@@ -96,13 +91,21 @@ ax_layout.set_aspect('equal')
 fig_layout.suptitle("Wind-farm layout")
 
 # Plot the flow field
-fig_flow, ax_flow = plot.flow_field(scenario, greedy_control_setpoints, xy_range=xy_range, clip=False)
-ax_flow.set_xlim(xy_range[0])
-ax_flow.set_ylim(xy_range[1])
-ax_flow.set_aspect('equal')
-fig_flow.suptitle("Flow field")
+fig_flow_greedy, ax_flow_greedy = plot.flow_field(scenario, greedy_control_setpoints, xy_range=xy_range, clip=False)
+ax_flow_greedy.set_xlim(xy_range[0])
+ax_flow_greedy.set_ylim(xy_range[1])
+ax_flow_greedy.set_aspect('equal')
+fig_flow_greedy.suptitle("Flow field (greedy control)")
+
+# Plot the flow field
+fig_flow_geometric, ax_flow_geometric = plot.flow_field(scenario, geometric_control_setpoints, xy_range=xy_range, clip=False)
+ax_flow_geometric.set_xlim(xy_range[0])
+ax_flow_geometric.set_ylim(xy_range[1])
+ax_flow_geometric.set_aspect('equal')
+fig_flow_geometric.suptitle("Flow field (geometric yaw)")
 
 # Show the plots
 # plt.close(fig_layout)
-# plt.close(fig_flow)
+# plt.close(fig_flow_greedy)
+# plt.close(fig_flow_geometric)
 plt.show()

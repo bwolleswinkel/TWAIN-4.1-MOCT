@@ -19,6 +19,35 @@ def remap(a: NPArray[float], range: tuple[float, float]) -> NPArray[float]:
     return range[0] + (range[1] - range[0]) * (a - np.min(a)) / (np.max(a) - np.min(a))
 
 
+def ensure_list(obj) -> list:
+    match obj:
+        case list():
+            return obj
+        case tuple():
+            return list(obj)
+        case np.ndarray():
+            return obj.tolist()
+        case float() | int() | bool():
+            return [obj]
+        case _:
+            return ValueError(f"Unsupported type '{type(obj)}'")
+        
+
+def find_datum(array: NPArray[float]) -> list[float, float]:
+    #: Round smallest element down to the nearest multiple of 1000
+    return np.floor(np.min(array, axis=0) / 1000) * 1000
+        
+
+def devisors(n: int) -> NPArray[int]:
+    # FROM: https://stackoverflow.com/questions/171765/what-is-the-best-way-to-get-all-the-divisors-of-a-number
+    divs = [1]
+    for i in range(2, int(np.sqrt(n)) + 1):
+        if n % i == 0:
+            divs.extend([i, int(n / i)])
+    divs.extend([n])
+    return np.array(list(set(divs)))
+
+
 def gen_gaussian_process(t: NPArray[float], kernel: str, params: dict) -> NPArray[float]:
     #: Match the kernel type
     match kernel:
